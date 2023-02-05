@@ -25,4 +25,10 @@ typedef uint32_t gid_t;
 typedef wchar_t WCHAR;
 #endif
 
+#ifdef __WUSERS_BUILDING_LIBRARY
+#define __WUSERS_ATTRIBUTE __declspec((dllexport))
+#else /* client code */
+#define __WUSERS_ATTRIBUTE __declspec((dllimport))
+#endif
+
 #endif /* _WUSER_TYPES_H_ */
