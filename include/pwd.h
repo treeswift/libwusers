@@ -7,8 +7,8 @@
 #ifndef _PWD_H_
 #define _PWD_H_
 
-#include "bsd_license.h"
-#include "wuser_types.h"
+#include "wusers/bsd_license.h"
+#include "wusers/wuser_types.h"
 
 struct passwd {
     char *pw_name; /* user name */

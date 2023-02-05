@@ -9,19 +9,20 @@ cmake_minimum_required(VERSION 3.0)
 project(wusers)
 
 set(libheaders
-"include/bsd_license.h"
-"include/wuser_types.h"
+"include/wusers/bsd_license.h"
+"include/wusers/wuser_types.h"
+"include/wusers/wuser_cpage.h"
 "include/grp.h"
 "include/pwd.h"
 )
 
 set(libsources
-"src/chr.h"
+"src/chr.hpp"
 "src/chr.cpp"
 "src/grp.cpp"
 "src/pwd.cpp")
 
-set(compiledefs "__WUSERS_BUILDING_LIBRARY" "__BSD_VISIBLE")
+set(compiledefs "__BSD_VISIBLE")
 if(MSVC)
     set(compile_flags "/Wall")
 else()

@@ -1,14 +1,15 @@
 /**
  * This file has no copyright assigned and is placed in the public domain.
- * This file demonstrates use of the libwusers compatibility library:
+ * This file is part of the libwusers compatibility library:
  *   https://github.com/treeswift/libwusers
  * No warranty is given; refer to the LICENSE file in the project root.
  */
 
-#include <pwd.h>
-#include <grp.h>
+#ifndef _CHR_H_
+#define _CHR_H_
 
-int main(int argc, char** argv) {
-    // TODO
-    return 0;
+namespace wusers {
+unsigned int get_cp();
 }
+
+#endif /* !_CHR_H_ */

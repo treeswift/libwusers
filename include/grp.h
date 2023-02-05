@@ -7,8 +7,8 @@
 #ifndef _GRP_H_
 #define _GRP_H_
 
-#include "bsd_license.h"
-#include "wuser_types.h"
+#include "wusers/bsd_license.h"
+#include "wusers/wuser_types.h"
 
 struct group {
     char *gr_name; /* group name */

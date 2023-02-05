@@ -7,13 +7,13 @@
 
 #include <pwd.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 namespace {
 static thread_local int curr_recid;
 }
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 struct passwd *getpwuid(uid_t) {
 	//
