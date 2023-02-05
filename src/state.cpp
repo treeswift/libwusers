@@ -6,7 +6,10 @@
  */
 
 #include "wusers/wuser_cpage.h"
-#include "chr.hpp"
+#include "state.hpp"
+
+#include <errno.h>
+#include <stdlib.h>
 
 namespace {
 constexpr unsigned int WUSER_UNSET_CP = ~0u;
@@ -19,9 +22,17 @@ static thread_local \
     unsigned int tls_cp = WUSER_UNSET_CP;
 }
 
-namespace wusers {
+namespace wusers_impl {
 unsigned int get_cp() {
     return tls_cp != WUSER_UNSET_CP ? tls_cp : app_cp != WUSER_UNSET_CP ? app_cp : WUSER_USE_UTF8;
+}
+
+void set_last_error(int last_error) {
+#ifdef ERRNO_IS_LVALUE
+    errno = last_error; // POSIX way
+#else
+    _set_errno(last_error); // cannonical native Windows way
+#endif
 }
 }
 

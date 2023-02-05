@@ -5,7 +5,7 @@
 
 # Inspired by: https://github.com/krux02/minimal_cmake_example (public domain)
 
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.2)
 project(wusers)
 
 set(libheaders
@@ -17,22 +17,30 @@ set(libheaders
 )
 
 set(libsources
-"src/chr.hpp"
-"src/chr.cpp"
 "src/grp.cpp"
-"src/pwd.cpp")
+"src/pwd.cpp"
+"src/state.hpp"
+"src/state.cpp"
+)
 
-set(compiledefs "__BSD_VISIBLE")
+set(compiledefs "__BSD_VISIBLE=1")
+
+if(MINGW)
+    set(compiledefs ${compiledefs} "ERRNO_IS_LVALUE")
+endif()
+
 if(MSVC)
     set(compile_flags "/Wall")
 else()
     set(compile_flags "-fPIC" "-Wall")
 endif()
+
 include_directories(include)
 
 add_library(wusers ${libheaders} ${libsources})
 target_compile_options(wusers PRIVATE ${compile_flags})
 target_compile_definitions(wusers PRIVATE ${compiledefs})
+target_link_libraries(wusers -lnetapi32)
 
 set(exesources "samples/wusersapp.cpp")
 add_executable(wusersapp ${exesources})

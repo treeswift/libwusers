@@ -28,8 +28,8 @@ struct passwd {
 extern "C" {
 #endif
 
-struct passwd *getpwuid(uid_t);
-struct passwd *getpwnam(const char *);
+struct passwd *getpwuid(uid_t uid);
+struct passwd *getpwnam(const char * user_name);
 struct passwd *getpwuid_shadow(uid_t);
 struct passwd *getpwnam_shadow(const char *);
 int getpwuid_r(uid_t, struct passwd *, char *, size_t, struct passwd **);
@@ -45,12 +45,14 @@ void endpwent(void);
 int setpassent(int);
 int uid_from_user(const char *, uid_t *);
 const char *user_from_uid(uid_t, int);
+#if _HAVE_BCRYPT
 char *bcrypt_gensalt(uint8_t);
 char *bcrypt(const char *, const char *);
 int bcrypt_newhash(const char *, int, char *, size_t);
 int bcrypt_checkpass(const char *, const char *);
+#endif // _HAVE_BCRYPT
 struct passwd *pw_dup(const struct passwd *);
-#endif
+#endif // _BSD_VISIBLE
 
 /* __END_DECLS */
 #ifdef __cplusplus

@@ -7,6 +7,12 @@
 #ifndef _WUSER_CPAGE_H_
 #define _WUSER_CPAGE_H_
 
+/**
+ * For specific encoding numbers, see:
+ *  https://learn.microsoft.com/en-us/windows/win32/intl/code-page-identifiers
+ * For special constants such as CP_ACP, CP_THREAD_ACP, CP_UTF8 see <winnls.h>
+ */
+
 /* __BEGIN_DECLS */
 #ifdef __cplusplus
 extern "C" {

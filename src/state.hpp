@@ -8,8 +8,10 @@
 #ifndef _CHR_H_
 #define _CHR_H_
 
-namespace wusers {
+namespace wusers_impl {
 unsigned int get_cp();
+
+void set_last_error(int last_error);
 }
 
 #endif /* !_CHR_H_ */
