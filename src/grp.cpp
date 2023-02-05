@@ -20,7 +20,7 @@ struct group *getgrgid(gid_t) {
 	return nullptr;
 }
 
-struct group *getgrnam(const TCHAR *) {
+struct group *getgrnam(const char *) {
 	//
 	return nullptr;
 }
@@ -41,11 +41,11 @@ void endgrent(void) {
 #endif
 
 #if __BSD_VISIBLE || __POSIX_VISIBLE >= 199506 || __XPG_VISIBLE
-int getgrgid_r(gid_t, struct group *, TCHAR *, size_t, struct group **) {
+int getgrgid_r(gid_t, struct group *, char *, size_t, struct group **) {
 	return 0;
 }
 
-int getgrnam_r(const TCHAR *, struct group *, TCHAR *, size_t, struct group **) {
+int getgrnam_r(const char *, struct group *, char *, size_t, struct group **) {
 	return 0;
 }
 #endif
@@ -56,14 +56,14 @@ int setgroupent(int) {
 	return 0;
 }
 
-int gid_from_group(const TCHAR *, gid_t *) {
+int gid_from_group(const char *, gid_t *) {
 	//
 	return 0;
 }
 
-const TCHAR *group_from_gid(gid_t, int) {
+const char *group_from_gid(gid_t, int) {
 	//
-	return _T("");
+	return "";
 }
 #endif
 

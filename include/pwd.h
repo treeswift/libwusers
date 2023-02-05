@@ -9,20 +9,17 @@
 
 #include "bsd_license.h"
 #include "wuser_types.h"
-#include "wuser_names.h"
-
-#define passwd __WUSER_UNICODE_AWARE(passwd)
 
 struct passwd {
-    TCHAR *pw_name; /* user name */
-    TCHAR *pw_passwd; /* encrypted password */
+    char *pw_name; /* user name */
+    char *pw_passwd; /* encrypted password */
     uid_t pw_uid; /* user uid */
     gid_t pw_gid; /* user gid */
     time_t pw_change; /* password change time */
-    TCHAR *pw_class; /* user access class */
-    TCHAR *pw_gecos; /* Honeywell login info */
-    TCHAR *pw_dir; /* home directory */
-    TCHAR *pw_shell; /* default shell */
+    char *pw_class; /* user access class */
+    char *pw_gecos; /* Honeywell login info */
+    char *pw_dir; /* home directory */
+    char *pw_shell; /* default shell */
     time_t pw_expire; /* account expiration */
 };
 
@@ -31,47 +28,27 @@ struct passwd {
 extern "C" {
 #endif
 
-#define getpwuid __WUSER_UNICODE_AWARE(getpwuid)
-#define getpwnam __WUSER_UNICODE_AWARE(getpwnam)
-#define getpwuid_shadow __WUSER_UNICODE_AWARE(getpwuid_shadow)
-#define getpwnam_shadow __WUSER_UNICODE_AWARE(getpwnam_shadow)
-#define getpwuid_r __WUSER_UNICODE_AWARE(getpwuid_r)
-#define getpwnam_r __WUSER_UNICODE_AWARE(getpwnam_r)
-
 struct passwd *getpwuid(uid_t);
-struct passwd *getpwnam(const TCHAR *);
+struct passwd *getpwnam(const char *);
 struct passwd *getpwuid_shadow(uid_t);
-struct passwd *getpwnam_shadow(const TCHAR *);
-int getpwuid_r(uid_t, struct passwd *, TCHAR *, size_t, struct passwd **);
-int getpwnam_r(const TCHAR *, struct passwd *, TCHAR *, size_t, struct passwd **);
+struct passwd *getpwnam_shadow(const char *);
+int getpwuid_r(uid_t, struct passwd *, char *, size_t, struct passwd **);
+int getpwnam_r(const char *, struct passwd *, char *, size_t, struct passwd **);
 
 #if __BSD_VISIBLE || __XPG_VISIBLE
-#define setpwent __WUSER_UNICODE_AWARE(setpwent)
-#define getpwent __WUSER_UNICODE_AWARE(getpwent)
-#define endpwent __WUSER_UNICODE_AWARE(endpwent)
-
 struct passwd *getpwent(void);
 void setpwent(void);
 void endpwent(void);
 #endif
 
 #if __BSD_VISIBLE
-#define setpassent      __WUSER_UNICODE_AWARE(setpassent)
-#define uid_from_user   __WUSER_UNICODE_AWARE(uid_from_user)
-#define user_from_uid   __WUSER_UNICODE_AWARE(user_from_uid)
-#define bcrypt_gensalt  __WUSER_UNICODE_AWARE(bcrypt_gensalt)
-#define bcrypt          __WUSER_UNICODE_AWARE(bcrypt)
-#define bcrypt_newhash  __WUSER_UNICODE_AWARE(bcrypt_newhash)
-#define bcrypt_checkpass __WUSER_UNICODE_AWARE(bcrypt_checkpass)
-#define pw_dup          __WUSER_UNICODE_AWARE(pw_dup)
-
 int setpassent(int);
-int uid_from_user(const TCHAR *, uid_t *);
-const TCHAR *user_from_uid(uid_t, int);
-TCHAR *bcrypt_gensalt(uint8_t);
-TCHAR *bcrypt(const TCHAR *, const TCHAR *);
-int bcrypt_newhash(const TCHAR *, int, TCHAR *, size_t);
-int bcrypt_checkpass(const TCHAR *, const TCHAR *);
+int uid_from_user(const char *, uid_t *);
+const char *user_from_uid(uid_t, int);
+char *bcrypt_gensalt(uint8_t);
+char *bcrypt(const char *, const char *);
+int bcrypt_newhash(const char *, int, char *, size_t);
+int bcrypt_checkpass(const char *, const char *);
 struct passwd *pw_dup(const struct passwd *);
 #endif
 

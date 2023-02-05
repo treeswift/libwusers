@@ -20,11 +20,6 @@ typedef uint32_t uid_t;
 typedef uint32_t gid_t;
 #endif
 
-#ifndef __WCHAR_DEFINED
-#define __WCHAR_DEFINED
-typedef wchar_t WCHAR;
-#endif
-
 #ifdef __WUSERS_BUILDING_LIBRARY
 #define __WUSERS_ATTRIBUTE __declspec((dllexport))
 #else /* client code */

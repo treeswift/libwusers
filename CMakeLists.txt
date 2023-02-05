@@ -10,31 +10,28 @@ project(wusers)
 
 set(libheaders
 "include/bsd_license.h"
-"include/wuser_names.h"
 "include/wuser_types.h"
 "include/grp.h"
 "include/pwd.h"
 )
 
 set(libsources
+"src/chr.h"
+"src/chr.cpp"
 "src/grp.cpp"
 "src/pwd.cpp")
 
 set(compiledefs "__WUSERS_BUILDING_LIBRARY" "__BSD_VISIBLE")
-set(compile_flags "-fPIC" "-Wall") # MOREINFO provide flags for MSVC
+if(MSVC)
+    set(compile_flags "/Wall")
+else()
+    set(compile_flags "-fPIC" "-Wall")
+endif()
 include_directories(include)
 
-add_library(wusers_a OBJECT ${libheaders} ${libsources})
-target_compile_options(wusers_a PRIVATE ${compile_flags})
-target_compile_definitions(wusers_a PRIVATE ${compiledefs})
-
-add_library(wusers_w OBJECT ${libheaders} ${libsources})
-target_compile_options(wusers_w PRIVATE ${compile_flags})
-target_compile_definitions(wusers_w PRIVATE ${compiledefs} "UNICODE")
-
-# Now combine Unicode and non-Unicode flavors into the output (expectedly a DLL)
-add_library(wusers "include/bsd_license.h") # CMake wants at least one input file
-target_link_libraries(wusers PUBLIC wusers_a wusers_w)
+add_library(wusers ${libheaders} ${libsources})
+target_compile_options(wusers PRIVATE ${compile_flags})
+target_compile_definitions(wusers PRIVATE ${compiledefs})
 
 set(exesources "samples/wusersapp.cpp")
 add_executable(wusersapp ${exesources})

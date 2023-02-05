@@ -20,7 +20,7 @@ struct passwd *getpwuid(uid_t) {
 	return nullptr;
 }
 
-struct passwd *getpwnam(const TCHAR *) {
+struct passwd *getpwnam(const char *) {
 	//
 	return nullptr;
 }
@@ -30,17 +30,17 @@ struct passwd *getpwuid_shadow(uid_t) {
 	return nullptr;
 }
 
-struct passwd *getpwnam_shadow(const TCHAR *) {
+struct passwd *getpwnam_shadow(const char *) {
 	//
 	return nullptr;
 }
 
-int getpwnam_r(const TCHAR *, struct passwd *, TCHAR *, size_t, struct passwd **) {
+int getpwnam_r(const char *, struct passwd *, char *, size_t, struct passwd **) {
 	//
 	return 0;
 }
 
-int getpwuid_r(uid_t, struct passwd *, TCHAR *, size_t, struct passwd **) {
+int getpwuid_r(uid_t, struct passwd *, char *, size_t, struct passwd **) {
 	//
 	return 0;
 }
@@ -66,32 +66,32 @@ int setpassent(int) {
 	return 0;
 }
 
-int uid_from_user(const TCHAR *, uid_t *) {
+int uid_from_user(const char *, uid_t *) {
 	//
 	return 0;
 }
 
-const TCHAR *user_from_uid(uid_t, int) {
+const char *user_from_uid(uid_t, int) {
 	//
-	return _T("");
+	return "";
 }
 
-TCHAR *bcrypt_gensalt(uint8_t) {
-	//
-	return nullptr;
-}
-
-TCHAR *bcrypt(const TCHAR *, const TCHAR *) {
+char *bcrypt_gensalt(uint8_t) {
 	//
 	return nullptr;
 }
 
-int bcrypt_newhash(const TCHAR *, int, TCHAR *, size_t) {
+char *bcrypt(const char *, const char *) {
+	//
+	return nullptr;
+}
+
+int bcrypt_newhash(const char *, int, char *, size_t) {
 	//
 	return 0;
 }
 
-int bcrypt_checkpass(const TCHAR *, const TCHAR *) {
+int bcrypt_checkpass(const char *, const char *) {
 	//
 	return 0;
 }
