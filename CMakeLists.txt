@@ -1,5 +1,10 @@
+# This file has no copyright assigned and is placed in the public domain.
+# This file is the build script of the libwusers compatibility library:
+#   https://github.com/treeswift/libwusers
+# No warranty is given; refer to the LICENSE file in the project root.
 
-# inspired by https://github.com/krux02/minimal_cmake_example (public domain)
+# Inspired by: https://github.com/krux02/minimal_cmake_example (public domain)
+
 cmake_minimum_required(VERSION 3.0)
 project(wusers)
 
