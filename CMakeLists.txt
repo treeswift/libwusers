@@ -19,13 +19,18 @@ set(libheaders
 set(libsources
 "src/grp.cpp"
 "src/pwd.cpp"
-"src/state.hpp"
-"src/state.cpp"
+"src/wus.h"
+"src/wus.cpp"
 )
+
+# Tuning:
+# _WUSER_USE_WINXP_API to use SID and dependent APIs
+# _WUSER_NO_HEURISTICS to bypass home folder search
 
 set(compiledefs "__BSD_VISIBLE=1")
 
 if(MINGW)
+    # only affects the library & samples, not headers
     set(compiledefs ${compiledefs} "ERRNO_IS_LVALUE")
 endif()
 
@@ -40,15 +45,15 @@ include_directories(include)
 add_library(wusers ${libheaders} ${libsources})
 target_compile_options(wusers PRIVATE ${compile_flags})
 target_compile_definitions(wusers PRIVATE ${compiledefs})
-target_link_libraries(wusers -lnetapi32)
+target_link_libraries(wusers -lnetapi32 -lkernel32 -ladvapi32)
 
-set(exesources "samples/wusersapp.cpp")
-add_executable(wusersapp ${exesources})
-target_compile_definitions(wusersapp PRIVATE __BSD_VISIBLE)
-target_link_libraries(wusersapp wusers)
+set(exesources "samples/wuserinfo.cpp")
+add_executable(wuserinfo ${exesources})
+target_compile_definitions(wuserinfo PRIVATE __BSD_VISIBLE)
+target_link_libraries(wuserinfo wusers)
 
 install(FILES ${libheaders} DESTINATION include)
-install(TARGETS wusers wusersapp DESTINATION bin)
+install(TARGETS wusers wuserinfo DESTINATION bin)
 
 set(CPACK_PACKAGE_NAME "wusers")
 set(CPACK_PACKAGE_VERSION "0.0.1")

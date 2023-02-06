@@ -6,7 +6,7 @@
  */
 
 #include "grp.h"      // API
-#include "state.hpp"  // library state
+#include "wus.h"  // library state
 #include <windows.h>  // *backend deps
 #include <lm.h>       // backend
 #include <errno.h>    // error codes

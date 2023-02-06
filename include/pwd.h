@@ -41,18 +41,21 @@ void setpwent(void);
 void endpwent(void);
 #endif
 
+/* NOTE: no Windows equivalents exist for fgetpwent, fgetpwent_r */
+
 #if __BSD_VISIBLE
 int setpassent(int);
 int uid_from_user(const char *, uid_t *);
 const char *user_from_uid(uid_t, int);
-#if _HAVE_BCRYPT
+#if _WUSERS_ENABLE_BCRYPT
+/* Not currently implemented, though may be needed by clients relying on system-provided crypto. */
 char *bcrypt_gensalt(uint8_t);
 char *bcrypt(const char *, const char *);
 int bcrypt_newhash(const char *, int, char *, size_t);
 int bcrypt_checkpass(const char *, const char *);
-#endif // _HAVE_BCRYPT
+#endif // _WUSERS_ENABLE_BCRYPT
 struct passwd *pw_dup(const struct passwd *);
-#endif // _BSD_VISIBLE
+#endif // __BSD_VISIBLE
 
 /* __END_DECLS */
 #ifdef __cplusplus

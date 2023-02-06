@@ -6,28 +6,12 @@
  */
 
 #include "pwd.h"      // API
-#include "state.hpp"  // library state
+#include "wus.h"  // library state
 #include <windows.h>  // *backend deps
 #include <lm.h>       // backend
 #include <errno.h>    // error codes
 
-#include <stringapiset.h> // -> state.cpp
-#include <cstring>
-#include <string>
-
-// passwd fields, again:
-// 
-// char *pw_name; /* user name */   // available since USER_INFO_1 :: usri1_name
-// char *pw_passwd; /* encrypted password */ // ditto; usri1_password, "Get" returns nullptr -> `*'
-// uid_t pw_uid; /* user uid */	// USER_INFO_3 contains DWORD usri3_user_id;
-// gid_t pw_gid; /* user gid */ // USER_INFO_3 contains DWORD usri3_primary_group_id
-// time_t pw_change; /* password change time */ // no LM equivalent; return usri3_password_expired?midnight():usri2_acct_expires
-// char *pw_class; /* user access class */      // USER_INFO_1 :: usri1_priv
-// char *pw_gecos; /* Honeywell login info */   // USER_INFO_2 :: usri2_full_name
-// char *pw_dir; /* home directory */           // USER_INFO_1 :: usri1_home_dir
-// char *pw_shell; /* default shell */ // no Windows equivalent; let's return `cmd.exe'
-// time_t pw_expire; /* account expiration */   // USER_INFO_2 :: usri2_acct_expires
-// output freed by NetApiBufferFree
+#include <cstdio>   // logging
 
 // pw_class somehow maps into one of:
 // USER_PRIV_GUEST Guest
@@ -36,9 +20,120 @@
 // (conversion back to enum is case insensitive)
 
 namespace {
-static thread_local int curr_recid;
-
 using namespace wusers_impl;
+
+static thread_local struct passwd tls_pwd;
+static thread_local OutBinder tls_obinder;
+
+constexpr const char* ASTER = "*"; // the elusive password "hash"
+constexpr const char* SHELL = "cmd.exe"; // default shell
+
+//#define _WUSER_USE_WINXP_API
+
+#ifdef _WUSER_USE_WINXP_API
+using USER_INFO_X = USER_INFO_4;
+constexpr int LVL = 4;
+#define USRI(name) usri4_##name
+#else
+using USER_INFO_X = USER_INFO_3;
+constexpr int LVL = 3;
+#define USRI(name) usri3_##name
+#endif
+
+struct Privilege {
+static constexpr const char* const GUEST = "Guest";
+static constexpr const char* const RUSER = "User";
+static constexpr const char* const ADMIN = "Administrator";
+static constexpr const char* const GENIE = "Daemon";
+
+static const char* win_to_text(DWORD priv) {
+    switch(priv) {
+        case USER_PRIV_GUEST:
+            return GUEST;
+        case USER_PRIV_USER:
+            return RUSER;
+        case USER_PRIV_ADMIN:
+            return ADMIN;
+        default: // unrecognized; must be some service account
+            return GENIE;
+    }
+}
+};
+
+bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX) {
+    // tls_obinder can't fail with ERANGE (the client buffer can)
+    tls_obinder = {};
+    auto writer = binder_writer(tls_obinder); // captures a reference
+
+    // TODO extract code below to support "reentrant" (*_r()) API
+    // the user name is available since USER_INFO_1::usri1_name
+    pwd.pw_name = /* CantBeNull() */ writer(wu_infoX.USRI(name));
+    // return immutable ("rodata") `*' in place of password hash
+    pwd.pw_passwd = const_cast<char*>(ASTER);
+    // return respective RIDs as UID and GID
+#ifdef _WUSER_USE_WINXP_API
+    pwd.pw_uid = GetRID(wu_infoX.USRI(user_sid));
+#else
+    pwd.pw_uid = wu_infoX.USRI(user_id);
+#endif
+    // users belong to more than one group; use the primary group
+    pwd.pw_gid = wu_infoX.USRI(primary_group_id);
+    
+    // the user access class string representation is unspecified and unused
+    pwd.pw_class = const_cast<char*>(Privilege::win_to_text(wu_infoX.USRI(priv)));
+
+    // the mysterious "gecos" is simply full name and/or contacts; put full name for now
+    pwd.pw_gecos = writer(wu_infoX.USRI(full_name));
+
+    pwd.pw_dir = writer(wu_infoX.USRI(profile)); // %USERPROFILE% eq %HOMEDRIVE%%HOMEDIR%
+#ifndef _WUSER_NO_HEURISTICS
+    if(!pwd.pw_dir || !*pwd.pw_dir) {
+        std::wstring cur_user = ExpandEnvvars(L"%USERNAME%");
+        std::wstring cur_home = ExpandEnvvars(L"%USERPROFILE%");
+        if(_wcsicmp(cur_user.c_str(), wu_infoX.USRI(name))) {
+            // the profile is not the current user
+            std::size_t last_bs = cur_home.find_last_of('\\');
+            if(last_bs != std::wstring::npos) {
+                cur_home.resize(last_bs + 1u);
+                cur_home.append(wu_infoX.USRI(name));
+                if(FILE_ATTRIBUTE_DIRECTORY & GetFileAttributesW(cur_home.c_str())) {
+                    pwd.pw_dir = writer(cur_home.c_str());
+                }
+            }
+        } else {
+            pwd.pw_dir = writer(cur_home.c_str());
+        }
+    }
+#endif
+
+    // The Windows setting for the default shell is
+    // HKEY_CLASSES_ROOT\{Drive|Directory|Directory\Background}\shell\cmd\command -- according to
+    // https://superuser.com/questions/608194/how-to-set-powershell-as-default-instead-of-cmd-exe
+    // -- and the per-user classes root is HKEY_USERS\<SID>\SOFTWARE\Classes (insert actual SID).
+    // There is also HKEY_USERS\<SID>\Environment which we can check for user-specific %ComSpec%.
+    // Getting the user SID is our exclusive reason to request USER_INFO_4 (introduced in WinXP)
+    // instead of USER_INFO_3 (which is available since Windows 2K). Also, GetEnvironmentVariable
+    // and GetEnvironmentStrings have been introduced in XP. ExpandEnvironmentStrings is Win 2K.
+    // ExpandEnvironmentStringsForUser needs a user token which our clients don't typically have.
+    // Note that usri?_script_path is the logon script path, which is not the same thing.
+    std::wstring shell = ExpandEnvvars(L"%ComSpec%");
+    if(shell.empty() || shell[0] == '%') {
+        pwd.pw_shell = const_cast<char*>(SHELL);
+    } else {
+        pwd.pw_shell = writer(shell.c_str());
+    }
+
+    // pw_expire stands for account expiration (not password expiration)
+    // usri?_acct_expires is, conveniently, seconds since the UNIX epoch
+    pwd.pw_change = pwd.pw_expire = wu_infoX.USRI(acct_expires);
+    if(wu_infoX.USRI(password_expired)) {
+        // absent better knowledge, let's pretend it expired one day ago
+        time(&pwd.pw_change);
+        pwd.pw_change -= 86400;
+    }
+    
+    return pwd.pw_name; // if this is defined, the record is kinda valid
+}
 }
 
 #ifdef __cplusplus
@@ -58,21 +153,12 @@ struct passwd *getpwuid(uid_t) {
 }
 
 struct passwd *getpwnam(const char * user_name) {
-    // this one is a one-to-one LM call mapping
-    int u_length = std::strlen(user_name);
-    if(!u_length) {
-        set_last_error(EINVAL);
-        return nullptr;
-    }
-    std::wstring wuser_name(u_length, L'\0'); // a conservative estimate
-    int w_length = MultiByteToWideChar(get_cp(), 0 /* flags */, user_name, u_length, &wuser_name[0], wuser_name.size());
-    if(!w_length) {
-        set_last_error(EINVAL);
-        return nullptr;
-    }
+    const std::wstring wuser_name = to_win_str(user_name);
+    if(wuser_name.empty()) return nullptr;
+
     struct passwd * retval = nullptr;
-    USER_INFO_3 * wu_info3 = nullptr;
-    switch(NetUserGetInfo(nullptr, wuser_name.data(), 3, reinterpret_cast<unsigned char**>(&wu_info3))) {
+    USER_INFO_X * wu_infoX = nullptr;
+    switch(NetUserGetInfo(nullptr, wuser_name.data(), LVL, reinterpret_cast<unsigned char**>(&wu_infoX))) {
     case ERROR_ACCESS_DENIED:
         set_last_error(EACCES);
         break;
@@ -84,14 +170,14 @@ struct passwd *getpwnam(const char * user_name) {
         set_last_error(ENOENT);
         break;
     case NERR_Success:
-        retval = new struct passwd; // TODO provide templated assignment operations; FIXME don't allocate!!!
-        // TODO
+        retval = &tls_pwd;
+        FillFrom(*retval, *wu_infoX);
         break;
     default:
         set_last_error(EIO);
     }
-    if(wu_info3) {
-        NetApiBufferFree(wu_info3);
+    if(wu_infoX) {
+        NetApiBufferFree(wu_infoX);
     }
     return retval;
 }
@@ -108,6 +194,7 @@ struct passwd *getpwnam_shadow(const char *) {
     return nullptr;
 }
 
+// user_name
 int getpwnam_r(const char *, struct passwd *, char *, size_t, struct passwd **) {
     //
     return 0;
@@ -149,7 +236,7 @@ const char *user_from_uid(uid_t, int) {
     return "";
 }
 
-#if __HAVE_BCRYPT
+#if _WUSERS_ENABLE_BCRYPT
 char *bcrypt_gensalt(uint8_t) {
     //
     return nullptr;
@@ -169,7 +256,7 @@ int bcrypt_checkpass(const char *, const char *) {
     //
     return 0;
 }
-#endif // _HAVE_BCRYPT
+#endif // _WUSERS_ENABLE_BCRYPT
 
 struct passwd *pw_dup(const struct passwd *) {
     //

@@ -31,6 +31,8 @@ struct group *getgrent(void);
 void endgrent(void);
 #endif
 
+/* NOTE: no Windows equivalents exist for fgetgrent, fgetgrent_r */
+
 #if __BSD_VISIBLE || __POSIX_VISIBLE >= 199506 || __XPG_VISIBLE
 int getgrgid_r(gid_t, struct group *, char *, size_t, struct group **);
 int getgrnam_r(const char *, struct group *, char *, size_t, struct group **);
@@ -47,4 +49,4 @@ const char *group_from_gid(gid_t, int);
 }
 #endif
 
-#endif /* !_GRP_H_ */
+#endif /* !_GRP_H_ */  
