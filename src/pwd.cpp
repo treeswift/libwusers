@@ -11,7 +11,7 @@
 #include <lm.h>       // backend
 #include <errno.h>    // error codes
 
-#include <cstdio>   // logging
+#include <memory>
 
 // pw_class somehow maps into one of:
 // USER_PRIV_GUEST Guest
@@ -22,14 +22,12 @@
 namespace {
 using namespace wusers_impl;
 
-static thread_local struct passwd tls_pwd;
-static thread_local OutBinder tls_pwd_bnd;
-
 constexpr const char* ASTER = "*"; // the elusive password "hash"
 constexpr const char* SHELL = "cmd.exe"; // default shell
 
-//#define _WUSER_USE_WINXP_API
-
+// WinXP introduces the notion of SID (fully qualified principal ID).
+// There is no use case for them in libwusers at present though, so
+// we don't even mention _WUSER_USE_WINXP_API in CMakeLists.txt
 #ifdef _WUSER_USE_WINXP_API
 using USER_INFO_X = USER_INFO_4;
 constexpr int LVL = 4;
@@ -107,7 +105,7 @@ bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX, OutWriter writer)
     // https://superuser.com/questions/608194/how-to-set-powershell-as-default-instead-of-cmd-exe
     // -- and the per-user classes root is HKEY_USERS\<SID>\SOFTWARE\Classes (insert actual SID).
     // There is also HKEY_USERS\<SID>\Environment which we can check for user-specific %ComSpec%.
-    // Getting the user SID is our exclusive reason to request USER_INFO_4 (introduced in WinXP)
+    // Getting the user SID mb our exclusive reason to request USER_INFO_4 (introduced in WinXP)
     // instead of USER_INFO_3 (which is available since Windows 2K). Also, GetEnvironmentVariable
     // and GetEnvironmentStrings have been introduced in XP. ExpandEnvironmentStrings is Win 2K.
     // ExpandEnvironmentStringsForUser needs a user token which our clients don't typically have.
@@ -131,7 +129,7 @@ bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX, OutWriter writer)
     return pwd.pw_name; // if this is defined, the record is kinda valid
 }
 
-struct passwd* QueryByName(const std::wstring& wuser_name, OutWriter writer) {
+struct passwd* QueryByName(const std::wstring& wuser_name, struct passwd* out_ptr, OutWriter writer) {
     struct passwd * retval = nullptr;
     USER_INFO_X * wu_infoX = nullptr;
     switch(NetUserGetInfo(nullptr, wuser_name.data(), LVL, reinterpret_cast<unsigned char**>(&wu_infoX))) {
@@ -146,7 +144,7 @@ struct passwd* QueryByName(const std::wstring& wuser_name, OutWriter writer) {
         set_last_error(ENOENT);
         break;
     case NERR_Success:
-        retval = &tls_pwd;
+        retval = out_ptr;
         FillFrom(*retval, *wu_infoX, writer);
         break;
     default:
@@ -155,9 +153,97 @@ struct passwd* QueryByName(const std::wstring& wuser_name, OutWriter writer) {
     if(wu_infoX) {
         NetApiBufferFree(wu_infoX);
     }
-   // tls_pwd_bnd can't fail with ERANGE (the client buffer can)
+   // tls_es.pwd_bnd can't fail with ERANGE (the client buffer can)
     return retval;
 }
+
+struct FreeBuffer {
+    void operator()(BYTE* ptr) { if(ptr) NetApiBufferFree(ptr); }
+};
+
+struct EntryState {
+    struct passwd pwd;
+    OutBinder pwd_bnd;
+};
+
+// while EntryState(^) is pretty much a passive storage container,
+// there is enough logic in QueryState to warrant objectification
+
+struct QueryState {
+    // set large enough to fit in a single query on a workstation
+    // but small enough to avoid hoarding too much memory.
+    // MAX_PREFERRED_LENGTH will request as much memory as needed
+    // to finish enumeration in one pass even on a server.
+    static constexpr const std::size_t PAGE = 32768u;
+
+    std::unique_ptr<BYTE, FreeBuffer> buf;
+    std::size_t offset;
+    std::size_t cursor;
+    DWORD entries_full;
+    DWORD entries_read;
+    DWORD query_resume;
+
+    const USER_INFO_X* buffer() const { return reinterpret_cast<const USER_INFO_X*>(buf.get()); }
+
+    void reset() {
+        buf.reset();
+        offset = 0u;
+        entries_read = 0u;
+        entries_full = 0u;
+        query_resume = 0u;
+    }
+
+    void query() {
+        set_last_error(0);
+        LPBYTE optr;
+        auto page = PAGE;
+        do switch(NetUserEnum(nullptr, LVL, FILTER_NORMAL_ACCOUNT /* use 0 to list roaming accounts */,  
+                                    &optr, page, &entries_read, &entries_full, &query_resume)) {
+        case ERROR_ACCESS_DENIED:
+            set_last_error(EACCES);
+            return;
+        case ERROR_INVALID_LEVEL:
+        case NERR_InvalidComputer:
+            set_last_error(EINVAL);
+            return;
+        case ERROR_MORE_DATA:
+        case NERR_Success:
+            buf.reset(optr);
+            offset += cursor;
+            cursor = 0u;
+            return;
+        case NERR_BufTooSmall:
+            page <<= 1;
+            break;
+        default:
+            set_last_error(EIO);
+            return;
+        } while(!errno);
+    }
+
+    const USER_INFO_X* curr() const {
+        return &buffer()[cursor];
+    }
+
+    const USER_INFO_X* step() {
+        if(buf.get()) {
+            if(cursor >= entries_read) {
+                if(cursor + offset >= entries_full) {
+                    return nullptr;
+                } else {
+                    query();
+                }
+            }
+            return &buffer()[cursor++];
+        } else {
+            return nullptr;
+        }
+    }
+};
+
+static thread_local EntryState tls_es;
+static thread_local QueryState tls_qs;
+
 } // namespace
 
 #ifdef __cplusplus
@@ -177,9 +263,10 @@ struct passwd *getpwuid(uid_t) {
 }
 
 struct passwd *getpwnam(const char * user_name) {
+    set_last_error(0);
     const std::wstring wuser_name = to_win_str(user_name);
     if(wuser_name.empty()) return nullptr; // sets EINVAL
-    return QueryByName(wuser_name, binder_writer(tls_pwd_bnd = {}));
+    return QueryByName(wuser_name, &tls_es.pwd, binder_writer(tls_es.pwd_bnd = {}));
 }
 
 // "_shadow()" functions are defined but return EACCES. We don't HAVE_SHADOW_H (or provide it).
@@ -200,8 +287,7 @@ int getpwnam_r(const char * user_name, struct passwd * out_pwd, char * out_buf, 
     *out_ptr = nullptr;
     const std::wstring wuser_name = to_win_str(user_name);
     if(wuser_name.empty()) {
-        auto writer = buffer_writer(&out_buf, &buf_len);
-        *out_ptr = QueryByName(wuser_name, writer);
+        *out_ptr = QueryByName(wuser_name, out_pwd, buffer_writer(&out_buf, &buf_len));
         if(errno) *out_ptr = nullptr; // kill partial|inconsistent output
     }
     return errno;
@@ -214,23 +300,24 @@ int getpwuid_r(uid_t, struct passwd *, char *, size_t, struct passwd **) {
 
 #if __BSD_VISIBLE || __XPG_VISIBLE
 void setpwent(void) {
-    //
+    tls_qs.reset();
+    tls_qs.query();
 }
 
 struct passwd *getpwent(void) {
-    //
-    return nullptr;
+    const auto* wu_info = tls_qs.step();
+    return (wu_info && FillFrom(tls_es.pwd, *wu_info, binder_writer(tls_es.pwd_bnd = {}))) ? &tls_es.pwd : nullptr;
 }
 
 void endpwent(void) {
-    //
+    tls_qs.reset();
 }
 #endif
 
 #if __BSD_VISIBLE
-int setpassent(int stayopen) {
-    //
-    return 0;
+int setpassent(int) {
+    setpwent();
+    return !errno;
 }
 
 int uid_from_user(const char * user_name, uid_t * out_uid) {
@@ -238,15 +325,15 @@ int uid_from_user(const char * user_name, uid_t * out_uid) {
         set_last_error(EINVAL);
         return -1;
     }
-    if(tls_pwd_bnd.empty() || (tls_pwd.pw_name && !std::strcmp(tls_pwd.pw_name, user_name)) || getpwnam(user_name)) {
-        *out_uid = tls_pwd.pw_uid;
+    if(tls_es.pwd_bnd.empty() || (tls_es.pwd.pw_name && !std::strcmp(tls_es.pwd.pw_name, user_name)) || getpwnam(user_name)) {
+        *out_uid = tls_es.pwd.pw_uid;
         return 0;
     }
     return -1;
 }
 
 const char *user_from_uid(uid_t, int) {
-    //
+    // uid, nouser
     return "";
 }
 

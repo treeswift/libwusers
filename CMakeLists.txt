@@ -24,7 +24,6 @@ set(libsources
 )
 
 # Tuning:
-# _WUSER_USE_WINXP_API to use SID and dependent APIs
 # _WUSER_NO_HEURISTICS to bypass home folder search
 
 set(compiledefs "__BSD_VISIBLE=1")
