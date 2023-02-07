@@ -69,29 +69,35 @@ std::wstring to_win_str(const char* posix_str, bool einval_if_empty) {
 }
 
 OutWriter buffer_writer(char** out_buf, size_t *buf_len) {
-    return [&] (const wchar_t* out_wstr) -> char* {
+    return [=] (const wchar_t* out_wstr) -> char* {
         if(!out_wstr) {
+            return nullptr;
+        }
+        if(!*buf_len) {
+            set_last_error(ERANGE);
             return nullptr;
         }
         char* out_put = *out_buf;
         std::size_t out_wlen = std::wcslen(out_wstr);
         if(out_wlen) {
-            int conv_len = WideCharToMultiByte(get_cp(), 0 /* flags */, out_wstr, out_wlen, *out_buf, *buf_len, nullptr, nullptr);
+            int conv_len = WideCharToMultiByte(get_cp(), 0 /* flags */, out_wstr, out_wlen, out_put, *buf_len - 1, nullptr, nullptr);
             if(conv_len) {
                 *out_buf += conv_len;
                 *buf_len -= conv_len;
             }
-            else switch(GetLastError()) {
+            else {
+                switch(GetLastError()) {
                 case ERROR_INSUFFICIENT_BUFFER:
                     set_last_error(ERANGE);
                     break;
                 default:
                     set_last_error(EINVAL);
                     break;
+                }
+                return nullptr;
             }
-            return nullptr;
         }
-        return out_put;
+        return (**out_buf = '\0'), (*out_buf)++, (*buf_len)++, out_put;
     };
 }
 

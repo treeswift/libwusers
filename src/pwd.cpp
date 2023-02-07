@@ -272,6 +272,7 @@ R QueryByUid(uid_t uid, std::function<R(struct passwd&)> report_asis,
     // bummer. run a full query, albeit without touching state
     QueryState qs;
     qs.reset();
+    qs.query();
     const USER_INFO_X * candidate = nullptr;
     while((candidate = qs.step())) {
         if(candidate->USRI(user_id) == uid) {
@@ -332,6 +333,7 @@ int getpwnam_r(const char * user_name, struct passwd * out_pwd, char * out_buf, 
 int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_len, struct passwd ** out_ptr) {
     set_last_error(0);
     *out_ptr = nullptr;
+    auto writer = buffer_writer(&out_buf, &buf_len);
     QueryByUid<int>(uid,
         [&](struct passwd& pwd) {
             // inefficient double string copy, but we save a (waaay more expensive) trip to the kernel/COM/NET
@@ -358,7 +360,7 @@ int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_le
             }
         },
         [&](const USER_INFO_X* wu_info) {
-            return FillFrom(*out_pwd, *wu_info, buffer_writer(&out_buf, &buf_len)) && !errno
+            return FillFrom(*out_pwd, *wu_info, writer) && !errno
                 ? (*out_ptr = out_pwd, 0)
                 : (*out_ptr = nullptr, -1);
         },
@@ -400,10 +402,22 @@ int uid_from_user(const char * user_name, uid_t * out_uid) {
 }
 
 const char *user_from_uid(uid_t uid, int nouser) {
+    // memory leak prevention; constants=arbitrary
+    if(tls_es.pwd_bnd.size() > 512u) {
+        // too many entries used...
+        auto itr = tls_es.pwd_bnd.begin();
+        // keep the last complete entry intact, but keep erasing
+        // those singular strings that are piling up on top of it
+        for(std::size_t i = 0; i < 12u; ++i) {
+            ++itr;
+        }
+        // ...yep, this. looks old enough.
+        tls_es.pwd_bnd.erase(itr);
+    }
     return QueryByUid<const char*>(uid,
         [](struct passwd& pwd) { return pwd.pw_name; },
-        [&](const USER_INFO_X* wu_info) { return binder_writer(tls_es.pwd_bnd = {})(wu_info->USRI(name)); },
-        [&]() { return IDToA(tls_es.pwd_bnd = {}, uid, nouser); }
+        [&](const USER_INFO_X* wu_info) { return binder_writer(tls_es.pwd_bnd)(wu_info->USRI(name)); },
+        [&]() { return IDToA(tls_es.pwd_bnd, uid, nouser); }
     );
 }
 

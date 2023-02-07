@@ -23,7 +23,8 @@ void DisplayUserRecord(const struct passwd & u_rec) {
     std::fprintf(stdout, "User home: %s\n", u_rec.pw_dir);
     std::fprintf(stdout, "Def shell: %s\n", u_rec.pw_shell);
 
-    // TODO convert Unix epoch here; also, represent Forever
+    // times are Unix epoch here; 0xffffffff (~0) means Forever
+    // further conversion is left as an exercise for the reader
     std::fprintf(stdout, "Acc until: %lld\n", u_rec.pw_expire);
     std::fprintf(stdout, "Pwd until: %lld\n", u_rec.pw_change);
     std::fprintf(stdout, "\n");
@@ -34,6 +35,7 @@ int main(int argc, char** argv) {
     bool show_help = false;
     bool show_list = false;
     bool log_tests = false;
+    bool show_dflt = false;
 
     // TODO/nth: pass custom uname or uid
     for(int argi = 1; argi < argc; ++argi) {
@@ -42,8 +44,34 @@ int main(int argc, char** argv) {
             show_help |= 'h' == opt;
             show_list |= 'a' == opt;
             log_tests |= 't' == opt;
+            show_dflt |= 'd' == opt;
         }
     }
+
+    if(show_help) std::fprintf(stdout,
+R"NOMOREHELP(
+This sample command-line tool uses POSIX APIs implemented on Windows (2000+)
+with libwusers to display account information on the local Windows machine.
+
+Usage:
+    wuserinfo.exe [/h] [/a] [/t] [/d]
+
+The meaning of the switches is as follows:
+
+    /d  display default users (Administrator and Guest)
+    /a  enumerate all user accounts
+    /t  display test log messages ("this feature works! this, too!")
+    /h  display this help
+
+    By default, only current account information is displayed.
+
+wuserinfo.exe and libwusers.dll are public domain worldwide -- both in binary
+and source code. They are free to use and abuse by anyone and for any purpose,
+for-profit use and abuse included.
+
+Further reading: https://github.com/treeswift/libwusers
+
+)NOMOREHELP");
 
     std::string uname(MAX_PATH, L'\0');
     std::size_t u_len = ExpandEnvironmentStringsA("%USERNAME%", &uname[0], uname.size());
@@ -112,7 +140,41 @@ int main(int argc, char** argv) {
             }
         }
         endpwent();
-        std::fprintf(stdout, "==== total entries in user database: %u\n", ++user_count);
+        std::fprintf(stdout, "==== total entries in user database: %u\n\n", user_count);
+    }
+
+    if(show_dflt) {
+        std::fprintf(stdout, "Default accounts with well-known RIDs:\n\n");
+
+        constexpr const uid_t ADMIN = 500;
+        constexpr const uid_t GUEST = 501;
+        constexpr const uid_t GENIE = ~0u;
+        struct passwd* admin_ptr = getpwuid(ADMIN);
+        DisplayUserRecord(*admin_ptr);
+        assert(!errno);
+        assert(!stricmp(admin_ptr->pw_class, "Administrator"));
+
+        struct passwd guest_pwd;
+        std::string guest_chars(32767, '\0');
+        struct passwd* guest_ptr;
+        int retval = getpwuid_r(GUEST, &guest_pwd, &guest_chars[0], guest_chars.size(), &guest_ptr);
+        assert(!retval);
+
+        DisplayUserRecord(guest_pwd);
+        assert(guest_ptr == &guest_pwd);
+        assert(!stricmp(guest_pwd.pw_class, "Guest"));
+
+        // once again please. request the guest (which isn't in the entry cache), then the admin (which currently is)
+        std::string admin_name_cc(admin_ptr->pw_name);
+        const char* guest_name = user_from_uid(GUEST, 0);
+        assert(!strcmp(guest_name, guest_pwd.pw_name));
+        const char* admin_name = user_from_uid(ADMIN, 0);
+        assert(!strcmp(admin_name, admin_name_cc));
+        const char* genie_name = user_from_uid(GENIE, 0);
+        assert(!strcmp(genie_name, "4294967295")); // uid
+        genie_name = user_from_uid(GENIE, 22 /*nouser*/);
+        assert(!genie_name); // nonexistent => nullptr
+        if(log_tests) std::fprintf(stdout, "tests passed: all!\n\n");
     }
 
     return 0;
