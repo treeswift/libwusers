@@ -39,7 +39,9 @@ There is no direct search by RID in Windows API. Instead of guessing the interme
 
 ### Group information
 
-Groups are WIP by themselves.
+_*** Groups are WIP! ***_
+
+Group field translation logic is much more straightforward. `gr_name` is the group name, `gr_mem` is a null-terminated `char*` array initialized from [GROUP_USER_INFO_0](https://learn.microsoft.com/en-us/windows/desktop/api/lmaccess/ns-lmaccess-group_users_info_0) values, `gr_gid` is the RID. `gr_passwd` has no Windows equivalent; an asterisk (`*`) is returned.
 
 ## Memory ownership
 
