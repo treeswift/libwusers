@@ -272,9 +272,37 @@ int bcrypt_checkpass(const char *, const char *) {
 }
 #endif // _WUSERS_ENABLE_BCRYPT
 
-struct passwd *pw_dup(const struct passwd *) {
-    //
-    return nullptr;
+struct passwd *pw_dup(const struct passwd * src) {
+    std::size_t size = sizeof(struct passwd);
+    auto len = [](const char* str) { return str ? std::strlen(str) + 1u : 0u; };
+    // now allocate space for strings
+    size += len(src->pw_name);
+    size += len(src->pw_passwd);
+    size += len(src->pw_class);
+    size += len(src->pw_gecos);
+    size += len(src->pw_dir);
+    size += len(src->pw_shell);
+
+    struct passwd * trg = reinterpret_cast<struct passwd*>(malloc(size));
+    memcpy(trg, src, sizeof(struct passwd));
+    char* ptr = reinterpret_cast<char*>(trg) + sizeof(struct passwd);
+    auto pass = [&ptr](const char* src_str) {
+        if(src_str) {
+            char* fld = ptr;
+            strcpy(fld, src_str);
+            ptr += strlen(src_str) + 1u;
+            return fld;
+        } else {
+            return static_cast<char*>(nullptr);
+        }
+    };
+    trg->pw_name = pass(src->pw_name);
+    trg->pw_passwd = pass(src->pw_passwd);
+    trg->pw_class = pass(src->pw_class);
+    trg->pw_gecos = pass(src->pw_gecos);
+    trg->pw_dir = pass(src->pw_dir);
+    trg->pw_shell = pass(src->pw_shell);
+    return trg;
 }
 #endif // __BSD_VISIBLE
 

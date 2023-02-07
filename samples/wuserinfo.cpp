@@ -34,6 +34,7 @@ int main(int argc, char** argv) {
     // TODO convert Unix epoch here; also, represent Forever
     std::fprintf(stderr, "Acc until: %lld\n", u_rec.pw_expire);
     std::fprintf(stderr, "Pwd until: %lld\n", u_rec.pw_change);
+    std::fprintf(stderr, "\n");
 
     uid_t last_uid = u_rec.pw_uid;
     uid_t dupl_uid = ~0;
@@ -49,8 +50,35 @@ int main(int argc, char** argv) {
     outbuf.resize(32767, '\0');
     assert(!getpwnam_r(uname.c_str(), &out_pwd, &outbuf[0], outbuf.size(), &out_ptr));
     assert(out_ptr == &out_pwd);
-    assert(!strcmp(out_pwd.pw_full_name, u_rec.pw_full_name));
+    assert(!strcmp(out_pwd.pw_gecos, u_rec.pw_gecos));
     std::fprintf(stderr, "getpwnam_r() tests passed\n");
+
+    auto copy_a = pw_dup(&u_rec);
+    auto copy_b = pw_dup(&u_rec);
+    auto copy_c = pw_dup(copy_a);
+
+    assert(Equal(*u_rec, *copy_a));
+    assert(Equal(*u_rec, *copy_b));
+    assert(Equal(*u_rec, *copy_c));
+
+    // beware: assuming pw_shell is copied last. see `pwd.cpp`
+    std::size_t combo_sz = copy_c->pw_shell - reinterpret_cast<char*>(copy_c) + std::strlen(copy_c->pw_shell);
+
+    auto PChrToOffs = [](struct passwd* pwd) {
+        uintptr_t pwo = reinterpret_cast<uintptr_t>(pwd);
+        auto to_off = [pwo](char*& fld){ if(fld) fld -= pwo; };
+        to_off(pwd->pw_name);
+        to_off(pwd->pw_passwd);
+        to_off(pwd->pw_class);
+        to_off(pwd->pw_gecos);
+        to_off(pwd->pw_dir);
+        to_off(pwd->pw_shell);
+    };
+
+    PChrToOffs(copy_b);
+    PChrToOffs(copy_c);
+    assert(!memcmp(copy_b, copy_c, combo_sz));
+    std::fprintf(stderr, "pw_dup() tests passed\n");
 
     // TODO test the rest
     return 0;

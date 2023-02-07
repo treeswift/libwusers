@@ -63,7 +63,7 @@ char *bcrypt(const char *, const char *);
 int bcrypt_newhash(const char *, int, char *, size_t);
 int bcrypt_checkpass(const char *, const char *);
 #endif // _WUSERS_ENABLE_BCRYPT
-struct passwd *pw_dup(const struct passwd *);
+struct passwd *pw_dup(const struct passwd * src);
 #endif // __BSD_VISIBLE
 
 /* __END_DECLS */
