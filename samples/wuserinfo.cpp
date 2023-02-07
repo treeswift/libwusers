@@ -23,24 +23,24 @@ int main(int argc, char** argv) {
     uname.resize(u_len, L'\0');
 
     const struct passwd & u_rec = *getpwnam(uname.c_str());
-    std::fprintf(stderr, "User name: %s\n", u_rec.pw_name);
-    std::fprintf(stderr, "Full name: %s\n", u_rec.pw_gecos);
-    std::fprintf(stderr, "UID:GID=%u:%u\n", u_rec.pw_uid, u_rec.pw_gid);
-    std::fprintf(stderr, "Pass hash: %s\n", u_rec.pw_passwd);
-    std::fprintf(stderr, "Privilege: %s\n", u_rec.pw_class);
-    std::fprintf(stderr, "User home: %s\n", u_rec.pw_dir);
-    std::fprintf(stderr, "Def shell: %s\n", u_rec.pw_shell);
+    std::fprintf(stdout, "User name: %s\n", u_rec.pw_name);
+    std::fprintf(stdout, "Full name: %s\n", u_rec.pw_gecos);
+    std::fprintf(stdout, "UID:GID=%u:%u\n", u_rec.pw_uid, u_rec.pw_gid);
+    std::fprintf(stdout, "Pass hash: %s\n", u_rec.pw_passwd);
+    std::fprintf(stdout, "Privilege: %s\n", u_rec.pw_class);
+    std::fprintf(stdout, "User home: %s\n", u_rec.pw_dir);
+    std::fprintf(stdout, "Def shell: %s\n", u_rec.pw_shell);
 
     // TODO convert Unix epoch here; also, represent Forever
-    std::fprintf(stderr, "Acc until: %lld\n", u_rec.pw_expire);
-    std::fprintf(stderr, "Pwd until: %lld\n", u_rec.pw_change);
-    std::fprintf(stderr, "\n");
+    std::fprintf(stdout, "Acc until: %lld\n", u_rec.pw_expire);
+    std::fprintf(stdout, "Pwd until: %lld\n", u_rec.pw_change);
+    std::fprintf(stdout, "\n");
 
     uid_t last_uid = u_rec.pw_uid;
     uid_t dupl_uid = ~0;
     assert(!uid_from_user(uname.c_str(), &dupl_uid));
     assert(last_uid == dupl_uid);
-    std::fprintf(stderr, "uid_from_user() test passed\n");
+    std::fprintf(stdout, "tests passed: uid_from_user()\n");
 
     std::string outbuf(10, '\0');
     struct passwd out_pwd;
@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
     assert(!getpwnam_r(uname.c_str(), &out_pwd, &outbuf[0], outbuf.size(), &out_ptr));
     assert(out_ptr == &out_pwd);
     assert(!strcmp(out_pwd.pw_gecos, u_rec.pw_gecos));
-    std::fprintf(stderr, "getpwnam_r() tests passed\n");
+    std::fprintf(stdout, "tests passed: getpwnam_r()\n");
 
     auto copy_a = pw_dup(&u_rec);
     auto copy_b = pw_dup(&u_rec);
@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
     PChrToOffs(copy_b);
     PChrToOffs(copy_c);
     assert(!memcmp(copy_b, copy_c, combo_sz));
-    std::fprintf(stderr, "pw_dup() tests passed\n");
+    std::fprintf(stdout, "tests passed: pw_dup()\n");
 
     // TODO test the rest
     return 0;
