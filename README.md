@@ -56,6 +56,8 @@ at least on the surface) and is therefore disrespected.
 Some of the memory management logic relies on the fact that `pw_shell` (the last `char*` field) is also the last field processed by `pw_dup()`.
 If you want to change that, search for `reinterpret_cast<char*>` to highlight these places in the code.
 
+Semantically constant C-string values (such as `*` in lieu of passwords, or privilege class names), though syntactically mutable, MAY reside in read-only memory.
+
 # Terms and conditions
 
 ## License
