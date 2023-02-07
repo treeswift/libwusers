@@ -68,63 +68,92 @@ std::wstring to_win_str(const char* posix_str, bool einval_if_empty) {
     }
 }
 
-OutWriter buffer_writer(char** out_buf, size_t *buf_len) {
-    return [=] (const wchar_t* out_wstr) -> char* {
-        if(!out_wstr) {
+char* BufferWriter::operator()(const wchar_t* out_wstr) const {
+    if(!out_wstr) {
+        return nullptr;
+    }
+    if(!buf_len) {
+        set_last_error(ERANGE);
+        return nullptr;
+    }
+    char* out_put = out_buf;
+    std::size_t out_wlen = std::wcslen(out_wstr);
+    if(out_wlen) {
+        int conv_len = WideCharToMultiByte(get_cp(), 0 /* flags */, out_wstr, out_wlen, out_put, buf_len - 1, nullptr, nullptr);
+        if(conv_len) {
+            out_buf += conv_len;
+            buf_len -= conv_len;
+        }
+        else {
+            switch(GetLastError()) {
+            case ERROR_INSUFFICIENT_BUFFER:
+                set_last_error(ERANGE);
+                break;
+            default:
+                set_last_error(EINVAL);
+                break;
+            }
             return nullptr;
         }
-        if(!*buf_len) {
-            set_last_error(ERANGE);
-            return nullptr;
-        }
-        char* out_put = *out_buf;
-        std::size_t out_wlen = std::wcslen(out_wstr);
-        if(out_wlen) {
-            int conv_len = WideCharToMultiByte(get_cp(), 0 /* flags */, out_wstr, out_wlen, out_put, *buf_len - 1, nullptr, nullptr);
-            if(conv_len) {
-                *out_buf += conv_len;
-                *buf_len -= conv_len;
-            }
-            else {
-                switch(GetLastError()) {
-                case ERROR_INSUFFICIENT_BUFFER:
-                    set_last_error(ERANGE);
-                    break;
-                default:
-                    set_last_error(EINVAL);
-                    break;
-                }
-                return nullptr;
-            }
-        }
-        return (**out_buf = '\0'), (*out_buf)++, (*buf_len)++, out_put;
-    };
+    }
+    return (*out_buf = '\0'), out_buf++, buf_len++, out_put;
 }
 
-OutWriter binder_writer(OutBinder& out_bdr) {
-    return [&] (const wchar_t* out_wstr) -> char* {
-        if(!out_wstr) {
+char* BufferWriter::operator()(const void* buf, std::size_t len) const {
+    if(!buf) {
+        return nullptr;
+    }
+    // harmless implicit alignment to uintptr_t
+    constexpr uintptr_t mask = sizeof(uintptr_t) - 1;
+    uintptr_t uiptrbuf = reinterpret_cast<uintptr_t>(out_buf);
+    uintptr_t fraction = ((uiptrbuf & mask) + mask) & ~mask;
+    if(len + fraction > buf_len) {
+        return nullptr;
+    }
+    // slightly suboptimal arithmetic, for clarity
+    out_buf += fraction;
+    buf_len -= fraction;
+    char* out_put = out_buf;
+    memcpy(out_buf, buf, len);
+    out_buf += len;
+    buf_len -= len;
+    return out_put;
+}
+
+char* BinderWriter::operator()(const wchar_t* out_wstr) const {
+    if(!out_wstr) {
+        return nullptr;
+    }
+    out_bdr.push_back({});
+    std::size_t out_wlen = std::wcslen(out_wstr);
+    std::string& out_str = out_bdr.back();
+    if(out_wlen) {
+        std::size_t grow_amt = sizeof(wchar_t) * out_wlen;
+        int conv_len, last_err;
+        do {
+            out_str.resize(out_str.size() + grow_amt);
+            conv_len = WideCharToMultiByte(get_cp(), 0 /* flags */, out_wstr, out_wlen, &out_str[0], out_str.size(), nullptr, nullptr);
+            last_err = conv_len ? ERROR_SUCCESS : GetLastError();
+        }
+        while(!conv_len && ERROR_INSUFFICIENT_BUFFER == last_err);
+        if(ERROR_SUCCESS != last_err) {
+            set_last_error(EINVAL);
             return nullptr;
         }
-        out_bdr.push_back({});
-        std::size_t out_wlen = std::wcslen(out_wstr);
-        std::string& out_str = out_bdr.back();
-        if(out_wlen) {
-            std::size_t grow_amt = sizeof(wchar_t) * out_wlen;
-            int conv_len, last_err;
-            do {
-                out_str.resize(out_str.size() + grow_amt);
-                conv_len = WideCharToMultiByte(get_cp(), 0 /* flags */, out_wstr, out_wlen, &out_str[0], out_str.size(), nullptr, nullptr);
-                last_err = conv_len ? ERROR_SUCCESS : GetLastError();
-            }
-            while(!conv_len && ERROR_INSUFFICIENT_BUFFER == last_err);
-            if(ERROR_SUCCESS != last_err) {
-                set_last_error(EINVAL);
-                return nullptr;
-            }
-        }
-        return &out_str[0];
-    };
+    }
+    return &out_str[0];
+}
+
+char* BinderWriter::operator()(const void* buf, std::size_t len) const {
+    // we _hope_ your string heap is aligned... but check as well
+    constexpr uintptr_t mask = sizeof(uintptr_t) - 1;
+    out_bdr.emplace_back(len + sizeof(uintptr_t), '\0');
+    char* out_buf = &out_bdr.back()[0];
+    uintptr_t uiptrbuf = reinterpret_cast<uintptr_t>(out_buf);
+    uintptr_t fraction = ((uiptrbuf & mask) + mask) & ~mask;
+    out_buf += fraction;
+    memcpy(out_buf, buf, len);
+    return out_buf;
 }
 
 const char* IDToA(OutBinder& out_bdr, unsigned int id, int no) {

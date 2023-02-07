@@ -14,12 +14,6 @@
 #include <memory>
 #include <sstream>
 
-// pw_class somehow maps into one of:
-// USER_PRIV_GUEST Guest
-// USER_PRIV_USER  User
-// USER_PRIV_ADMIN Administrator
-// (conversion back to enum is case insensitive)
-
 namespace {
 using namespace wusers_impl;
 
@@ -59,7 +53,7 @@ static const char* win_to_text(DWORD priv) {
 }
 };
 
-bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX, OutWriter writer) {
+bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX, const OutWriter& writer) {
      // TODO extract code below to support "reentrant" (*_r()) API
     // the user name is available since USER_INFO_1::usri1_name
     pwd.pw_name = /* CantBeNull() */ writer(wu_infoX.USRI(name));
@@ -130,7 +124,7 @@ bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX, OutWriter writer)
     return pwd.pw_name; // if this is defined, the record is kinda valid
 }
 
-struct passwd* QueryByName(const std::wstring& wuser_name, struct passwd* out_ptr, OutWriter writer) {
+struct passwd* QueryByName(const std::wstring& wuser_name, struct passwd* out_ptr, const OutWriter& writer) {
     struct passwd * retval = nullptr;
     USER_INFO_X * wu_infoX = nullptr;
     switch(NetUserGetInfo(nullptr, wuser_name.data(), LVL, reinterpret_cast<unsigned char**>(&wu_infoX))) {
@@ -246,7 +240,7 @@ static thread_local EntryState tls_es;
 static thread_local QueryState tls_qs;
 
 struct passwd* FillInternalEntry(const USER_INFO_X* wu_info) {
-    return (wu_info && FillFrom(tls_es.pwd, *wu_info, binder_writer(tls_es.pwd_bnd = {}))) ? &tls_es.pwd : nullptr;
+    return (wu_info && FillFrom(tls_es.pwd, *wu_info, BinderWriter(tls_es.pwd_bnd = {}))) ? &tls_es.pwd : nullptr;
 }
 
 struct passwd* Identity(struct passwd& pwd) { return &pwd; } // as is
@@ -303,7 +297,7 @@ struct passwd *getpwnam(const char * user_name) {
     set_last_error(0);
     const std::wstring wuser_name = to_win_str(user_name);
     if(wuser_name.empty()) return nullptr; // sets EINVAL
-    return QueryByName(wuser_name, &tls_es.pwd, binder_writer(tls_es.pwd_bnd = {}));
+    return QueryByName(wuser_name, &tls_es.pwd, BinderWriter(tls_es.pwd_bnd = {}));
 }
 
 // "_shadow()" functions are defined but return EACCES. We don't HAVE_SHADOW_H (or provide it).
@@ -324,7 +318,7 @@ int getpwnam_r(const char * user_name, struct passwd * out_pwd, char * out_buf, 
     *out_ptr = nullptr;
     const std::wstring wuser_name = to_win_str(user_name);
     if(wuser_name.empty()) {
-        *out_ptr = QueryByName(wuser_name, out_pwd, buffer_writer(&out_buf, &buf_len));
+        *out_ptr = QueryByName(wuser_name, out_pwd, BufferWriter(out_buf, buf_len));
         if(errno) *out_ptr = nullptr; // kill partial|inconsistent output
     }
     return errno;
@@ -333,7 +327,7 @@ int getpwnam_r(const char * user_name, struct passwd * out_pwd, char * out_buf, 
 int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_len, struct passwd ** out_ptr) {
     set_last_error(0);
     *out_ptr = nullptr;
-    auto writer = buffer_writer(&out_buf, &buf_len);
+    BufferWriter writer(out_buf, buf_len);
     QueryByUid<int>(uid,
         [&](struct passwd& pwd) {
             // inefficient double string copy, but we save a (waaay more expensive) trip to the kernel/COM/NET
@@ -416,7 +410,7 @@ const char *user_from_uid(uid_t uid, int nouser) {
     }
     return QueryByUid<const char*>(uid,
         [](struct passwd& pwd) { return pwd.pw_name; },
-        [&](const USER_INFO_X* wu_info) { return binder_writer(tls_es.pwd_bnd)(wu_info->USRI(name)); },
+        [&](const USER_INFO_X* wu_info) { return BinderWriter(tls_es.pwd_bnd)(wu_info->USRI(name)); },
         [&]() { return IDToA(tls_es.pwd_bnd, uid, nouser); }
     );
 }
