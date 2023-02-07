@@ -14,15 +14,7 @@
 
 #include <windows.h> // envvars
 
-int main(int argc, char** argv) {
-    // ASCII
-
-    std::string uname(MAX_PATH, L'\0');
-    std::size_t u_len = ExpandEnvironmentStringsA("%USERNAME%", &uname[0], uname.size());
-    assert(u_len < MAX_PATH);
-    uname.resize(u_len, L'\0');
-
-    const struct passwd & u_rec = *getpwnam(uname.c_str());
+void DisplayUserRecord(const struct passwd & u_rec) {
     std::fprintf(stdout, "User name: %s\n", u_rec.pw_name);
     std::fprintf(stdout, "Full name: %s\n", u_rec.pw_gecos);
     std::fprintf(stdout, "UID:GID=%u:%u\n", u_rec.pw_uid, u_rec.pw_gid);
@@ -35,12 +27,38 @@ int main(int argc, char** argv) {
     std::fprintf(stdout, "Acc until: %lld\n", u_rec.pw_expire);
     std::fprintf(stdout, "Pwd until: %lld\n", u_rec.pw_change);
     std::fprintf(stdout, "\n");
+}
+
+
+int main(int argc, char** argv) {
+
+    bool show_help = false;
+    bool show_list = false;
+    bool log_tests = false;
+
+    // TODO/nth: pass custom uname or uid
+    for(int argi = 1; argi < argc; ++argi) {
+        if(argv[argi] && '/' == *argv[argi]) {
+            char opt = argv[argi][1];
+            show_help |= 'h' == opt;
+            show_list |= 'a' == opt;
+            log_tests |= 't' == opt;
+        }
+    }
+
+    std::string uname(MAX_PATH, L'\0');
+    std::size_t u_len = ExpandEnvironmentStringsA("%USERNAME%", &uname[0], uname.size());
+    assert(u_len < MAX_PATH);
+    uname.resize(u_len, L'\0');
+
+    const struct passwd & u_rec = *getpwnam(uname.c_str());
+    DisplayUserRecord(u_rec);
 
     uid_t last_uid = u_rec.pw_uid;
     uid_t dupl_uid = ~0;
     assert(!uid_from_user(uname.c_str(), &dupl_uid));
     assert(last_uid == dupl_uid);
-    std::fprintf(stdout, "tests passed: uid_from_user()\n");
+    if(log_tests) std::fprintf(stdout, "tests passed: uid_from_user()\n");
 
     std::string outbuf(10, '\0');
     struct passwd out_pwd;
@@ -51,7 +69,7 @@ int main(int argc, char** argv) {
     assert(!getpwnam_r(uname.c_str(), &out_pwd, &outbuf[0], outbuf.size(), &out_ptr));
     assert(out_ptr == &out_pwd);
     assert(!strcmp(out_pwd.pw_gecos, u_rec.pw_gecos));
-    std::fprintf(stdout, "tests passed: getpwnam_r()\n");
+    if(log_tests) std::fprintf(stdout, "tests passed: getpwnam_r()\n");
 
     auto copy_a = pw_dup(&u_rec);
     auto copy_b = pw_dup(&u_rec);
@@ -78,8 +96,25 @@ int main(int argc, char** argv) {
     PChrToOffs(copy_b);
     PChrToOffs(copy_c);
     assert(!memcmp(copy_b, copy_c, combo_sz));
-    std::fprintf(stdout, "tests passed: pw_dup()\n");
+    if(log_tests) std::fprintf(stdout, "tests passed: pw_dup()\n\n");
 
-    // TODO test the rest
+    // enumeration API; overwrites u_rec, but it's copied to copy_a
+    if(show_list) {
+        std::size_t user_count = 0u;
+        setpwent();
+        assert(!errno);
+        struct passwd* cursor;
+        while((cursor = getpwent())) {
+            std::fprintf(stdout, "# enumerating user database: user# %u\n", ++user_count);
+            DisplayUserRecord(*cursor);
+            if(copy_a->pw_uid == cursor->pw_uid) {
+                assert(copy_a->pw_gid == cursor->pw_gid); // primary group id must match
+                assert(!strcmp(copy_a->pw_gecos, cursor->pw_gecos)); // contact must match
+            }
+        }
+        endpwent();
+        std::fprintf(stdout, "==== total entries in user database: %u\n", ++user_count);
+    }
+
     return 0;
 }
