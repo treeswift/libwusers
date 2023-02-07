@@ -228,7 +228,7 @@ void endpwent(void) {
 #endif
 
 #if __BSD_VISIBLE
-int setpassent(int) {
+int setpassent(int stayopen) {
     //
     return 0;
 }

@@ -48,7 +48,7 @@ void endpwent(void);
 /* NOTE: no Windows equivalents exist for fgetpwent, fgetpwent_r */
 
 #if __BSD_VISIBLE
-int setpassent(int entry_index);
+int setpassent(int stayopen);
 
 /* Caching and reentrancy as per @link https://man.openbsd.org/uid_from_user.3 */
 int uid_from_user(const char * user_name, uid_t * out_uid);
