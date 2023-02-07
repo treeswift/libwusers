@@ -23,7 +23,7 @@ namespace {
 using namespace wusers_impl;
 
 static thread_local struct passwd tls_pwd;
-static thread_local OutBinder tls_obinder;
+static thread_local OutBinder tls_pwd_bnd;
 
 constexpr const char* ASTER = "*"; // the elusive password "hash"
 constexpr const char* SHELL = "cmd.exe"; // default shell
@@ -60,12 +60,8 @@ static const char* win_to_text(DWORD priv) {
 }
 };
 
-bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX) {
-    // tls_obinder can't fail with ERANGE (the client buffer can)
-    tls_obinder = {};
-    auto writer = binder_writer(tls_obinder); // captures a reference
-
-    // TODO extract code below to support "reentrant" (*_r()) API
+bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX, OutWriter writer) {
+     // TODO extract code below to support "reentrant" (*_r()) API
     // the user name is available since USER_INFO_1::usri1_name
     pwd.pw_name = /* CantBeNull() */ writer(wu_infoX.USRI(name));
     // return immutable ("rodata") `*' in place of password hash
@@ -134,7 +130,35 @@ bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX) {
     
     return pwd.pw_name; // if this is defined, the record is kinda valid
 }
+
+struct passwd* QueryByName(const std::wstring& wuser_name, OutWriter writer) {
+    struct passwd * retval = nullptr;
+    USER_INFO_X * wu_infoX = nullptr;
+    switch(NetUserGetInfo(nullptr, wuser_name.data(), LVL, reinterpret_cast<unsigned char**>(&wu_infoX))) {
+    case ERROR_ACCESS_DENIED:
+        set_last_error(EACCES);
+        break;
+    case ERROR_BAD_NETPATH: // can't happen -- we are local
+    case NERR_InvalidComputer: // ^^ ditto
+        set_last_error(EHOSTUNREACH);
+        break;
+    case NERR_UserNotFound:
+        set_last_error(ENOENT);
+        break;
+    case NERR_Success:
+        retval = &tls_pwd;
+        FillFrom(*retval, *wu_infoX, writer);
+        break;
+    default:
+        set_last_error(EIO);
+    }
+    if(wu_infoX) {
+        NetApiBufferFree(wu_infoX);
+    }
+   // tls_pwd_bnd can't fail with ERANGE (the client buffer can)
+    return retval;
 }
+} // namespace
 
 #ifdef __cplusplus
 extern "C" {
@@ -154,32 +178,8 @@ struct passwd *getpwuid(uid_t) {
 
 struct passwd *getpwnam(const char * user_name) {
     const std::wstring wuser_name = to_win_str(user_name);
-    if(wuser_name.empty()) return nullptr;
-
-    struct passwd * retval = nullptr;
-    USER_INFO_X * wu_infoX = nullptr;
-    switch(NetUserGetInfo(nullptr, wuser_name.data(), LVL, reinterpret_cast<unsigned char**>(&wu_infoX))) {
-    case ERROR_ACCESS_DENIED:
-        set_last_error(EACCES);
-        break;
-    case ERROR_BAD_NETPATH: // can't happen -- we are local
-    case NERR_InvalidComputer: // ^^ ditto
-        set_last_error(EHOSTUNREACH);
-        break;
-    case NERR_UserNotFound:
-        set_last_error(ENOENT);
-        break;
-    case NERR_Success:
-        retval = &tls_pwd;
-        FillFrom(*retval, *wu_infoX);
-        break;
-    default:
-        set_last_error(EIO);
-    }
-    if(wu_infoX) {
-        NetApiBufferFree(wu_infoX);
-    }
-    return retval;
+    if(wuser_name.empty()) return nullptr; // sets EINVAL
+    return QueryByName(wuser_name, binder_writer(tls_pwd_bnd = {}));
 }
 
 // "_shadow()" functions are defined but return EACCES. We don't HAVE_SHADOW_H (or provide it).
@@ -195,9 +195,16 @@ struct passwd *getpwnam_shadow(const char *) {
 }
 
 // user_name
-int getpwnam_r(const char *, struct passwd *, char *, size_t, struct passwd **) {
-    //
-    return 0;
+int getpwnam_r(const char * user_name, struct passwd * out_pwd, char * out_buf, size_t buf_len, struct passwd ** out_ptr) {
+    set_last_error(0);
+    *out_ptr = nullptr;
+    const std::wstring wuser_name = to_win_str(user_name);
+    if(wuser_name.empty()) {
+        auto writer = buffer_writer(&out_buf, &buf_len);
+        *out_ptr = QueryByName(wuser_name, writer);
+        if(errno) *out_ptr = nullptr; // kill partial|inconsistent output
+    }
+    return errno;
 }
 
 int getpwuid_r(uid_t, struct passwd *, char *, size_t, struct passwd **) {
@@ -226,9 +233,16 @@ int setpassent(int) {
     return 0;
 }
 
-int uid_from_user(const char *, uid_t *) {
-    //
-    return 0;
+int uid_from_user(const char * user_name, uid_t * out_uid) {
+    if(!user_name) {
+        set_last_error(EINVAL);
+        return -1;
+    }
+    if(tls_pwd_bnd.empty() || (tls_pwd.pw_name && !std::strcmp(tls_pwd.pw_name, user_name)) || getpwnam(user_name)) {
+        *out_uid = tls_pwd.pw_uid;
+        return 0;
+    }
+    return -1;
 }
 
 const char *user_from_uid(uid_t, int) {

@@ -35,6 +35,23 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "Acc until: %lld\n", u_rec.pw_expire);
     std::fprintf(stderr, "Pwd until: %lld\n", u_rec.pw_change);
 
+    uid_t last_uid = u_rec.pw_uid;
+    uid_t dupl_uid = ~0;
+    assert(!uid_from_user(uname.c_str(), &dupl_uid));
+    assert(last_uid == dupl_uid);
+    std::fprintf(stderr, "uid_from_user() test passed\n");
+
+    std::string outbuf(10, '\0');
+    struct passwd out_pwd;
+    struct passwd * out_ptr = nullptr;
+    assert(getpwnam_r(uname.c_str(), &out_pwd, &outbuf[0], outbuf.size(), &out_ptr));
+    assert(!out_ptr);
+    outbuf.resize(32767, '\0');
+    assert(!getpwnam_r(uname.c_str(), &out_pwd, &outbuf[0], outbuf.size(), &out_ptr));
+    assert(out_ptr == &out_pwd);
+    assert(!strcmp(out_pwd.pw_full_name, u_rec.pw_full_name));
+    std::fprintf(stderr, "getpwnam_r() tests passed\n");
+
     // TODO test the rest
     return 0;
 }

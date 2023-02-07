@@ -30,7 +30,7 @@ using OutWriter = std::function<char*(const wchar_t*)>;
 using OutBinder = std::list<std::string>;
 
 // "reentrant" (blahblah_r()) conversions into client-provided memory
-OutWriter buffer_writer(char*& out_buf, /* no std:: here! */ size_t buf_len);
+OutWriter buffer_writer(char** out_buf, /* no std:: here! */ size_t* buf_len);
 
 // conversions into library-owned memory
 OutWriter binder_writer(OutBinder& out_str);

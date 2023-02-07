@@ -1,5 +1,5 @@
 /**
- * This file is a modified "grp.h" from OpenBSD headers
+ * This file is a modified "grp.h" from OpenBSD headers, ifself
  * available under the 3-clause BSD license ("bsd_license.h").
  * The use of this file is free as in freedom; no warranty is given.
  */

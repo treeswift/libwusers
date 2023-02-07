@@ -1,5 +1,5 @@
 /**
- * This file is a modified "pwd.h" from OpenBSD headers
+ * This file is a rewritten "pwd.h" from OpenBSD headers, itself
  * available under the 3-clause BSD license ("bsd_license.h").
  * The use of this file is free as in freedom; no warranty is given.
  */
@@ -30,23 +30,32 @@ extern "C" {
 
 struct passwd *getpwuid(uid_t uid);
 struct passwd *getpwnam(const char * user_name);
-struct passwd *getpwuid_shadow(uid_t);
-struct passwd *getpwnam_shadow(const char *);
-int getpwuid_r(uid_t, struct passwd *, char *, size_t, struct passwd **);
-int getpwnam_r(const char *, struct passwd *, char *, size_t, struct passwd **);
+
+/* Not implemented, returns nullptr and sets EACCES */
+struct passwd *getpwuid_shadow(uid_t uid);
+/* Not implemented, returns nullptr and sets EACCES */
+struct passwd *getpwnam_shadow(const char * user_name);
+
+int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_len, struct passwd ** out_ptr);
+int getpwnam_r(const char * user_name, struct passwd * out_pwd, char * out_buf, size_t buf_len, struct passwd ** out_ptr);
 
 #if __BSD_VISIBLE || __XPG_VISIBLE
-struct passwd *getpwent(void);
 void setpwent(void);
+struct passwd *getpwent(void);
 void endpwent(void);
 #endif
 
 /* NOTE: no Windows equivalents exist for fgetpwent, fgetpwent_r */
 
 #if __BSD_VISIBLE
-int setpassent(int);
-int uid_from_user(const char *, uid_t *);
-const char *user_from_uid(uid_t, int);
+int setpassent(int entry_index);
+
+/* Caching and reentrancy as per @link https://man.openbsd.org/uid_from_user.3 */
+int uid_from_user(const char * user_name, uid_t * out_uid);
+
+/* Caching and reentrancy as per @link https://man.openbsd.org/uid_from_user.3 */
+const char *user_from_uid(uid_t uid, int nouser);
+
 #if _WUSERS_ENABLE_BCRYPT
 /* Not currently implemented, though may be needed by clients relying on system-provided crypto. */
 char *bcrypt_gensalt(uint8_t);
