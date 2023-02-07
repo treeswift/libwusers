@@ -12,6 +12,7 @@
 #include <errno.h>    // error codes
 
 #include <memory>
+#include <sstream>
 
 // pw_class somehow maps into one of:
 // USER_PRIV_GUEST Guest
@@ -244,6 +245,42 @@ struct QueryState {
 static thread_local EntryState tls_es;
 static thread_local QueryState tls_qs;
 
+struct passwd* FillInternalEntry(const USER_INFO_X* wu_info) {
+    return (wu_info && FillFrom(tls_es.pwd, *wu_info, binder_writer(tls_es.pwd_bnd = {}))) ? &tls_es.pwd : nullptr;
+}
+
+struct passwd* Identity(struct passwd& pwd) { return &pwd; } // as is
+struct passwd* NotFound() { return nullptr; } // typed neutral element
+
+// note that we could extract the condition predicate as well; but there is no POSIX API to request a generic query
+template<typename R>
+R QueryByUid(uid_t uid, std::function<R(struct passwd&)> report_asis,
+                        std::function<R(const USER_INFO_X*)> process,
+                        std::function<R()> not_found) {
+    // let's examine our caches first
+    if(tls_es.pwd.pw_uid == uid) { // lucky!
+        return report_asis(tls_es.pwd);
+    }
+    if(tls_qs.buffer() && tls_qs.entries_read) {
+        for(std::size_t i = 0; i < tls_qs.entries_read; ++i) {
+            const USER_INFO_X * candidate = tls_qs.buffer()+i;
+            if(candidate->USRI(user_id) == uid) { // lucky too
+                return process(candidate);
+            }
+        }
+    }
+    // bummer. run a full query, albeit without touching state
+    QueryState qs;
+    qs.reset();
+    const USER_INFO_X * candidate = nullptr;
+    while((candidate = qs.step())) {
+        if(candidate->USRI(user_id) == uid) {
+            return process(candidate);
+        }
+    }
+    return not_found();
+}
+
 } // namespace
 
 #ifdef __cplusplus
@@ -257,9 +294,8 @@ extern "C" {
 // -- However, *nix tools ported to Windows are unlikely to be used on Active Directory/domain
 // -- controllers for native user management anyway. TODO put a note in README.md
 
-struct passwd *getpwuid(uid_t) {
-    // 
-    return nullptr;
+struct passwd *getpwuid(uid_t uid) {
+    return QueryByUid<struct passwd*>(uid, &Identity, &FillInternalEntry, &NotFound);
 }
 
 struct passwd *getpwnam(const char * user_name) {
@@ -293,9 +329,41 @@ int getpwnam_r(const char * user_name, struct passwd * out_pwd, char * out_buf, 
     return errno;
 }
 
-int getpwuid_r(uid_t, struct passwd *, char *, size_t, struct passwd **) {
-    //
-    return 0;
+int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_len, struct passwd ** out_ptr) {
+    set_last_error(0);
+    *out_ptr = nullptr;
+    QueryByUid<int>(uid,
+        [&](struct passwd& pwd) {
+            // inefficient double string copy, but we save a (waaay more expensive) trip to the kernel/COM/NET
+            struct passwd* copy = pw_dup(&pwd);
+            // assumes that pw_shell is last (see note under `struct passwd` in <pwd.h>)
+            char* copy_chars =  reinterpret_cast<char*>(copy) + sizeof(struct passwd);
+            std::size_t breq = copy->pw_shell - copy_chars + std::strlen(copy->pw_shell);
+            if(breq > buf_len) {
+                set_last_error(ERANGE);
+                return -1;
+            } else {
+                memcpy(out_pwd, copy, sizeof(struct passwd));
+                memcpy(out_buf, copy_chars, breq);
+                // six char* fields exactly
+                out_pwd->pw_name   = out_buf + (copy->pw_name   - copy_chars);
+                out_pwd->pw_passwd = out_buf + (copy->pw_passwd - copy_chars);
+                out_pwd->pw_class  = out_buf + (copy->pw_class  - copy_chars);
+                out_pwd->pw_gecos  = out_buf + (copy->pw_gecos  - copy_chars);
+                out_pwd->pw_dir    = out_buf + (copy->pw_dir    - copy_chars);
+                out_pwd->pw_shell  = out_buf + (copy->pw_shell  - copy_chars);
+                *out_ptr = out_pwd;
+                free(copy);
+                return 0;
+            }
+        },
+        [&](const USER_INFO_X* wu_info) {
+            return FillFrom(*out_pwd, *wu_info, buffer_writer(&out_buf, &buf_len)) && !errno
+                ? (*out_ptr = out_pwd, 0)
+                : (*out_ptr = nullptr, -1);
+        },
+        [](){ return -1; });
+    return errno;
 }
 
 #if __BSD_VISIBLE || __XPG_VISIBLE
@@ -305,8 +373,7 @@ void setpwent(void) {
 }
 
 struct passwd *getpwent(void) {
-    const auto* wu_info = tls_qs.step();
-    return (wu_info && FillFrom(tls_es.pwd, *wu_info, binder_writer(tls_es.pwd_bnd = {}))) ? &tls_es.pwd : nullptr;
+    return FillInternalEntry(tls_qs.step());
 }
 
 void endpwent(void) {
@@ -325,36 +392,39 @@ int uid_from_user(const char * user_name, uid_t * out_uid) {
         set_last_error(EINVAL);
         return -1;
     }
-    if(tls_es.pwd_bnd.empty() || (tls_es.pwd.pw_name && !std::strcmp(tls_es.pwd.pw_name, user_name)) || getpwnam(user_name)) {
+    if((tls_es.pwd_bnd.size() && tls_es.pwd.pw_name && !std::strcmp(tls_es.pwd.pw_name, user_name)) || getpwnam(user_name)) {
         *out_uid = tls_es.pwd.pw_uid;
         return 0;
     }
     return -1;
 }
 
-const char *user_from_uid(uid_t, int) {
-    // uid, nouser
-    return "";
+const char *user_from_uid(uid_t uid, int nouser) {
+    return QueryByUid<const char*>(uid,
+        [](struct passwd& pwd) { return pwd.pw_name; },
+        [&](const USER_INFO_X* wu_info) { return binder_writer(tls_es.pwd_bnd = {})(wu_info->USRI(name)); },
+        [&]() { return IDToA(tls_es.pwd_bnd = {}, uid, nouser); }
+    );
 }
 
 #if _WUSERS_ENABLE_BCRYPT
 char *bcrypt_gensalt(uint8_t) {
-    //
+    // UNIMPLEMENTED
     return nullptr;
 }
 
 char *bcrypt(const char *, const char *) {
-    //
+    // UNIMPLEMENTED
     return nullptr;
 }
 
 int bcrypt_newhash(const char *, int, char *, size_t) {
-    //
+    // UNIMPLEMENTED
     return 0;
 }
 
 int bcrypt_checkpass(const char *, const char *) {
-    //
+    // UNIMPLEMENTED
     return 0;
 }
 #endif // _WUSERS_ENABLE_BCRYPT

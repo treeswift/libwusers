@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <cstring>
 #include <cwchar>
+#include <sstream>
 
 #include <windows.h> // stringapiset.h, errhandlingapi.h, userenv.h
 
@@ -118,6 +119,14 @@ OutWriter binder_writer(OutBinder& out_bdr) {
         }
         return &out_str[0];
     };
+}
+
+const char* IDToA(OutBinder& out_bdr, unsigned int id, int no) {
+    if(no) return nullptr;
+    std::stringstream ss;
+    ss << id;
+    out_bdr.push_back(ss.str());
+    return out_bdr.back().c_str();
 }
 
 std::wstring ExpandEnvvars(const wchar_t * percent_str) {

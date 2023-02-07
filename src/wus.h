@@ -33,9 +33,11 @@ using OutBinder = std::list<std::string>;
 OutWriter buffer_writer(char** out_buf, /* no std:: here! */ size_t* buf_len);
 
 // conversions into library-owned memory
-OutWriter binder_writer(OutBinder& out_str);
+OutWriter binder_writer(OutBinder& out_bdr);
 
 std::wstring ExpandEnvvars(const wchar_t * percent_str);
+
+const char* IDToA(OutBinder& out_str, unsigned int id, int no = 0);
 
 unsigned int GetRID(PSID sid);
 

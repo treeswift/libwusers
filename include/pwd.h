@@ -23,6 +23,8 @@ struct passwd {
     time_t pw_expire; /* account expiration */
 };
 
+/* libwusers note: pw_shell MUST be the last char* field lest certain buffer sizing assumptions break */
+
 /* __BEGIN_DECLS */
 #ifdef __cplusplus
 extern "C" {

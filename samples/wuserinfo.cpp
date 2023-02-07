@@ -29,7 +29,6 @@ void DisplayUserRecord(const struct passwd & u_rec) {
     std::fprintf(stdout, "\n");
 }
 
-
 int main(int argc, char** argv) {
 
     bool show_help = false;
