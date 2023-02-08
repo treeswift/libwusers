@@ -29,7 +29,8 @@ There is no direct search by RID in Windows API. Instead of guessing the interme
 `libwusers` converts from [USER_INFO_3](https://learn.microsoft.com/en-us/windows/win32/api/lmaccess/ns-lmaccess-user_info_3) to [struct passwd](https://man.openbsd.org/getpwnam.3).
 
 * `pw_name` is… well, the name. On Windows, it MAY contain spaces; make sure your project won't be confused. Queries by account name are case-insensitive.
-* `pw_uid` and `pw_gid` are RIDs of the user and the user's primary group, respectively. (In fact, pre-WinXP API doesn't even know what a SID is.)
+* `pw_uid` and `pw_gid` are RIDs of the user and the user's primary group, respectively. WinXP APIs allow requesting SIDs instead of RIDs,
+but only the last component (=RID) fits within POSIX types.
 * `pw_gecos` is the user's full name.
 * `pw_class` is the string representation of the privilege level, i.e. one of the three strings: "User", "Administrator" or "Guest".
 * `pw_dir` is the user's profile folder. Since `NetUserGetInfo` returns home directory information only on servers, some second-guessing is applied. First, if the user name matches `%USERNAME%`, `%USERPROFILE%` is returned as is. Second, if the user name is different, but `dirname(%USERPROFILE)\\%USERNAME%` exists and is a directory, it is returned as the best informed guess. Otherwise (or if libwusers is compiled with `_WUSER_NO_HEURISTICS`), and empty string is returned.
