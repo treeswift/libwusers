@@ -40,9 +40,11 @@ but only the last component (=RID) fits within POSIX types.
 
 ### Group information
 
-_*** Groups are WIP! ***_
-
 Group field translation logic is much more straightforward. `gr_name` is the group name, `gr_mem` is a null-terminated `char*` array initialized from [GROUP_USER_INFO_0](https://learn.microsoft.com/en-us/windows/desktop/api/lmaccess/ns-lmaccess-group_users_info_0) values, `gr_gid` is the RID. `gr_passwd` has no Windows equivalent; an asterisk (`*`) is returned.
+
+It _may_ be possible to access more group and group membership information that an unpriviliged process can retrieve using NetGroupGetInfo() and NetGroupGetUsers() by using elevation,
+or the local group API ("local groups" aren't a subset of "groups", but a different object class), or the WMI API. All of these options _can_ be explored; the question is, as always,
+the intended use case.
 
 ## Memory ownership
 

@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
     bool show_list = false;
     bool log_tests = false;
     bool show_dflt = false;
-    bool show_grps = false;
+    bool test_grps = false;
     bool list_grps = false;
 
     // TODO/nth: pass custom uname or uid
@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
             show_list |= 'a' == opt;
             log_tests |= 't' == opt;
             show_dflt |= 'd' == opt;
-            show_grps |= 'g' == opt;
+            test_grps |= 'g' == opt;
             list_grps |= 'l' == opt;
         }
     }
@@ -81,10 +81,10 @@ The meaning of the switches is as follows:
 
     /d  display default users (Administrator and Guest)
     /a  enumerate all user accounts
-    /g  display well-known groups, such as Administrators, with members
+    /g  test group lookup API (id<-to->name, reentrancy, etc.)
     /l  list all groups with members
     /t  display test log messages ("this feature works! this, too!")
-    /h  display this help
+    /h  display this help text
 
     The order of the command-line switches does not affect the display order.
     If no switches are passed, only current account information is displayed.
@@ -105,7 +105,7 @@ Further reading: https://github.com/treeswift/libwusers
     const struct passwd & u_rec = *getpwnam(uname.c_str());
     DisplayUserRecord(u_rec);
 
-    uid_t last_uid = u_rec.pw_uid;
+    const uid_t last_uid = u_rec.pw_uid;
     uid_t dupl_uid = ~0;
     assert(!uid_from_user(uname.c_str(), &dupl_uid));
     assert(last_uid == dupl_uid);
@@ -200,11 +200,44 @@ Further reading: https://github.com/treeswift/libwusers
         assert(!strcmp(genie_name, "4294967295")); // uid
         genie_name = user_from_uid(GENIE, 22 /*nouser*/);
         assert(!genie_name); // nonexistent => nullptr
-        if(log_tests) std::fprintf(stdout, "tests passed: all!\n\n");
+        if(log_tests) std::fprintf(stdout, "tests passed: default accounts\n\n");
     }
 
-    if(show_grps) {
-        std::fprintf(stdout, "(Some) default groups with well-known RIDs:\n\n");
+    if(test_grps) {
+        if(log_tests) {
+            std::fprintf(stdout, "Group lookup API tests (using the current user's group as a canary):\n\n");
+        }
+        const gid_t last_gid = copy_a->pw_gid;
+        auto currgr = getgrgid(last_gid); // all we currently know
+        assert(currgr && !errno); // current user's group must be readable
+        DisplayGroupRecord(*currgr);
+        assert(currgr->gr_gid == last_gid); // must have requested id
+
+        // spoil in-memory data and re-retrieve with reentrant API methods
+        std::string orig_name = currgr->gr_name;
+        currgr->gr_gid++;
+        (*currgr->gr_name)++;
+        std::string copy_nam(32767, '\0');
+        std::string copy_gid(32767, '\0');
+        struct group out_nam, *ptr_nam;
+        struct group out_gid, *ptr_gid;
+        auto byname = getgrgid_r(last_gid, &out_gid, &copy_gid[0], copy_gid.size(), &ptr_gid);
+        auto by_gid = getgrnam_r(orig_name.c_str(), &out_nam, &copy_nam[0], copy_nam.size(), &ptr_nam);
+        assert(!errno);
+        assert((ptr_gid == &out_gid) && (ptr_nam == &out_nam));
+        assert(!std::strcmp(orig_name.c_str(), out_nam.gr_name));
+        assert(!std::strcmp(orig_name.c_str(), out_gid.gr_name));
+        assert(getgrnam(orig_name.c_str())); // must re-retrieve (restore) original entry at currgr
+        assert(!std::strcmp(orig_name.c_str(), currgr->gr_name)); // name restored
+        assert(currgr->gr_gid == last_gid); // gid restored
+        if(log_tests) std::fprintf(stdout, "tests passed: getgr{gid|nam}[_r]()\n\n");
+
+        const char* group_name = group_from_gid(last_gid, 0);
+        assert(!std::strcmp(group_name, orig_name.c_str()));
+        gid_t dupl_gid = ~0;
+        assert(!gid_from_group(group_name.c_str(), &dupl_gid));
+        assert(last_gid == dupl_gid);
+        if(log_tests) std::fprintf(stdout, "tests passed: gid_from_group() <-> group_from_gid()\n\n");
     }
 
     if(list_grps) {
