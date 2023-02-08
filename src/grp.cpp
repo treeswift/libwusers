@@ -152,14 +152,63 @@ void endgrent(void) {
 #endif
 
 #if __BSD_VISIBLE || __POSIX_VISIBLE >= 199506 || __XPG_VISIBLE
-int getgrgid_r(gid_t, struct group *, char *, size_t, struct group **) {
-    // WIP
-    return 0;
+int getgrnam_r(const char * group_name, struct group * out_grp, char * out_buf, size_t buf_len, struct group ** out_ptr) {
+    // the code is identical to getpwnam_r, but set_last_error() would probably look funny in Stateless<>; leave for now
+    set_last_error(0);
+    *out_ptr = nullptr;
+    const std::wstring wgroup_name = to_win_str(group_name);
+    if(wgroup_name.size()) {
+        *out_ptr = Stateless<struct group>::QueryByName(wgroup_name, out_grp, BufferWriter(out_buf, buf_len));
+        if(errno) *out_ptr = nullptr; // kill partial|inconsistent output
+    }
+    return errno;
 }
 
-int getgrnam_r(const char *, struct group *, char *, size_t, struct group **) {
-    // WIP
-    return 0;
+int getgrgid_r(gid_t gid, struct group * out_grp, char * out_buf, size_t buf_len, struct group ** out_ptr) {
+    // most of the (e.g. visual) complexity of getpwuid_r comes from the owned entry duplication block.
+    // as the comment in pwd.cpp correctly indicates (I know: I wrote it), it's still worth the saved trip
+    // to the kernel and system services. however, getpwuid_r takes pw_dup for granted. there is no gr_dup.
+    // instead of creating it for the sole purpose of abusing it, we'd rather code a faithful cloning op /
+    // buffer writeout here.
+    set_last_error(0);
+    *out_ptr = nullptr;
+    BufferWriter writer(out_buf, buf_len);
+    tls.queryByIdAndMap<int>(gid,
+        [&](struct group& grp) {
+            std::size_t name_sz = std::strlen(grp.gr_name) + 1u;
+            std::size_t pass_sz = std::strlen(grp.gr_passwd) + 1u;
+            std::size_t estimate = sizeof(struct group) + name_sz + pass_sz;
+            std::basic_string<std::size_t> mem_lengths;
+            const char* mem_ptr;
+            while((estimate <= buf_len) && (mem_ptr = grp.gr_mem[mem_lengths.size()])) {
+                mem_lengths.push_back(std::strlen(mem_ptr) + 1u);
+                estimate += mem_lengths.back();
+            }
+            if(estimate > buf_len) {
+                set_last_error(ERANGE);
+                return -1;
+            }
+
+            memcpy(out_grp, &grp, sizeof(struct group)); // only copies the gid
+                // ... but if more fixed-size fields are added, we are covered
+            out_grp->gr_mem = reinterpret_cast<char**>(out_buf);
+            std::size_t msz = sizeof(uintptr_t) * (mem_lengths.size() + 1u);
+            out_buf += msz;
+            buf_len -= msz;
+            out_grp->gr_name = writer(grp.gr_name, name_sz);
+            out_grp->gr_passwd = writer(grp.gr_passwd, pass_sz);
+            for(std::size_t i = 0; i < mem_lengths.size(); ++i) {
+                out_grp->gr_mem[i] = writer(grp.gr_mem[i], mem_lengths.at(i));
+            }
+            return 0;
+        },
+        [&](const GROUP_INFO_X* wu_info) {
+            return FillFrom(*out_grp, *wu_info, writer) && !errno
+                ? (*out_ptr = out_grp, 0)
+                : (*out_ptr = nullptr, -1);
+        },
+        [](){ return -1; });
+    return errno;
 }
 #endif
 
