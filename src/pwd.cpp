@@ -131,13 +131,10 @@ template<> struct IA<struct passwd>
     static constexpr int LVL = ULVL;
     static constexpr NET_API_STATUS NotFound = NERR_UserNotFound;
 
-    static id_t IdOf(const struct passwd& pwd) {
-        return pwd.pw_uid;
-    }
-
-    static id_t IdOf(const NETAPI_INFO_T* wui) {
-        return wui->USRI(user_id);
-    }
+    static id_t IdOf(const struct passwd& pwd) { return pwd.pw_uid; }
+    static id_t IdOf(const NETAPI_INFO_T* wui) { return wui->USRI(user_id); }
+    static const char* NameOf(struct passwd& pwd) { return pwd.pw_name; }
+    static const wchar_t* WNameOf(const NETAPI_INFO_T* wui) { return wui->USRI(name); }
 
     static NET_API_STATUS Enumerate(LPCWSTR servername, DWORD level, LPBYTE *bufptr, DWORD prefmaxlen,
                                 LPDWORD entriesread, LPDWORD totalentries, PDWORD_PTR resume_handle) {
@@ -175,10 +172,7 @@ struct passwd *getpwuid(uid_t uid) {
 }
 
 struct passwd *getpwnam(const char * user_name) {
-    set_last_error(0);
-    const std::wstring wuser_name = to_win_str(user_name);
-    if(wuser_name.empty()) return nullptr; // sets EINVAL
-    return tls.queryByName(wuser_name);
+    return tls.queryByName(user_name);
 }
 
 // "_shadow()" functions are defined but return EACCES. We don't HAVE_SHADOW_H (or provide it).
@@ -245,8 +239,7 @@ int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_le
 
 #if __BSD_VISIBLE || __XPG_VISIBLE
 void setpwent(void) {
-    tls.query_state.reset();
-    tls.query_state.query();
+    tls.beginEnum();
 }
 
 struct passwd *getpwent(void) {
@@ -254,7 +247,7 @@ struct passwd *getpwent(void) {
 }
 
 void endpwent(void) {
-    tls.query_state.reset();
+    tls.endEnum();
 }
 #endif
 
@@ -265,35 +258,11 @@ int setpassent(int) {
 }
 
 int uid_from_user(const char * user_name, uid_t * out_uid) {
-    if(!user_name) {
-        set_last_error(EINVAL);
-        return -1;
-    }
-    if((tls.owned_binder.size() && tls.owned_record.pw_name && !std::strcmp(tls.owned_record.pw_name, user_name)) || getpwnam(user_name)) {
-        *out_uid = tls.owned_record.pw_uid;
-        return 0;
-    }
-    return -1;
+    return tls.nameToId(user_name, out_uid);
 }
 
 const char *user_from_uid(uid_t uid, int nouser) {
-    // memory leak prevention; constants=arbitrary
-    if(tls.owned_binder.size() > 512u) {
-        // too many entries used...
-        auto itr = tls.owned_binder.begin();
-        // keep the last complete entry intact, but keep erasing
-        // those singular strings that are piling up on top of it
-        for(std::size_t i = 0; i < 12u; ++i) {
-            ++itr;
-        }
-        // ...yep, this. looks old enough.
-        tls.owned_binder.erase(itr);
-    }
-    return tls.queryByIdAndMap<const char*>(uid,
-        [](struct passwd& pwd) { return pwd.pw_name; },
-        [&](const USER_INFO_X* wu_info) { return BinderWriter(tls.owned_binder)(wu_info->USRI(name)); },
-        [&]() { return IDToA(tls.owned_binder, uid, nouser); }
-    );
+    return tls.idToName(uid, nouser);
 }
 
 #if _WUSERS_ENABLE_BCRYPT

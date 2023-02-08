@@ -156,7 +156,7 @@ char* BinderWriter::operator()(const void* buf, std::size_t len) const {
     return out_buf;
 }
 
-const char* IDToA(OutBinder& out_bdr, unsigned int id, int no) {
+const char* IDToA(OutBinder& out_bdr, unsigned int id, bool no) {
     if(no) return nullptr;
     std::stringstream ss;
     ss << id;
@@ -178,6 +178,21 @@ std::wstring ExpandEnvvars(const wchar_t * percent_str) {
 
 unsigned int GetRID(PSID sid) {
     return *GetSidSubAuthority(sid, *GetSidSubAuthorityCount(sid)-1);
+}
+
+void GC(OutBinder& bdr) {
+    // memory leak prevention; constants:=arbitrary within reasonable
+    if(bdr.size() > 512u) {
+        // too many entries used...
+        auto itr = bdr.begin();
+        // keep the last complete entry intact, but keep erasing
+        // those singular strings that are piling up on top of it
+        for(std::size_t i = 0; i < 12u; ++i) {
+            ++itr;
+        }
+        // ...yep, this. looks old enough.
+        bdr.erase(itr);
+    }
 }
 
 } // namespace wusers_impl

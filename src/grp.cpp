@@ -18,8 +18,8 @@ namespace wusers_impl {
 
 constexpr const char* ASTER = "*"; // no such thing as a group password on Windows
 
-using NETAPI_INFO_T = GROUP_INFO_2;
-constexpr int LVL = 2;
+using GROUP_INFO_X = GROUP_INFO_2;
+constexpr int GLVL = 2;
 #define GRPI(name) grpi2_##name
 
 void GetUsersFrom(const wchar_t* group_name, std::function<void(const wchar_t*)> on_member) {
@@ -67,7 +67,7 @@ void GetUsersFrom(const wchar_t* group_name, std::function<void(const wchar_t*)>
 // getting the member list requires a catch-up call to NetGroupGetUsers();
 // storing it requires passing a raw memory range into `writer`. therefore
 // `writer` can't be std::function anymore. making it a virtual class.
-bool FillFrom(struct group& grp, const NETAPI_INFO_T& wg_infoX, const OutWriter& writer) {
+bool FillFrom(struct group& grp, const GROUP_INFO_X& wg_infoX, const OutWriter& writer) {
     // all we need is:
     grp.gr_name = writer(wg_infoX.GRPI(name));
     grp.gr_passwd = const_cast<char*>(ASTER);
@@ -94,6 +94,24 @@ bool FillFrom(struct group& grp, const NETAPI_INFO_T& wg_infoX, const OutWriter&
 // IA = InfoAdapter/Infodapter
 template<> struct IA<struct group>
 {
+    using id_t = gid_t;
+    using NETAPI_INFO_T = GROUP_INFO_X;
+    static constexpr int LVL = GLVL;
+    static constexpr NET_API_STATUS NotFound = NERR_GroupNotFound;
+
+    static id_t IdOf(const struct group& grp) { return grp.gr_gid; }
+    static id_t IdOf(const NETAPI_INFO_T* wui) { return wui->GRPI(group_id); }
+    static const char* NameOf(struct group& grp) { return grp.gr_name; }
+    static const wchar_t* WNameOf(const NETAPI_INFO_T* wui) { return wui->GRPI(name); }
+
+    static NET_API_STATUS Enumerate(LPCWSTR servername, DWORD level, LPBYTE *bufptr, DWORD prefmaxlen,
+                                LPDWORD entriesread, LPDWORD totalentries, PDWORD_PTR resume_handle) {
+        return NetGroupEnum(servername, level, bufptr, prefmaxlen, entriesread, totalentries, resume_handle);
+    }
+
+    static NET_API_STATUS GetInfo(LPCWSTR servername, LPCWSTR name, DWORD level, LPBYTE* bufptr) {
+        return NetGroupGetInfo(servername, name, level, bufptr);
+    }
 };
 
 } // namespace wusers_impl
@@ -102,53 +120,7 @@ namespace
 { 
 using namespace wusers_impl; 
 
-static struct group* QueryByName(const std::wstring& name, struct group* out_ptr, const OutWriter& writer) {
-    return QueryInfoByName<struct group, NETAPI_INFO_T, LVL, &NetUserGetInfo, NERR_UserNotFound>(name, out_ptr, writer);
-}
-
-static thread_local struct /*State*/ {
-    using QueryState = EnumQueryState<NETAPI_INFO_T, LVL, &NetGroupEnum>;
-
-    struct {
-        struct group grp;
-        OutBinder grp_bnd;
-    } es;
-    QueryState qs;
-
-    // note that we could extract the condition predicate as well; but there is no POSIX API to request a generic query
-    template<typename R>
-    R QueryByUid(uid_t gid, std::function<R(struct group&)> report_asis,
-                            std::function<R(const NETAPI_INFO_T*)> process,
-                            std::function<R()> not_found) {
-        // let's examine our caches first
-        if(es.grp.gr_gid == gid) { // lucky!
-            return report_asis(es.grp);
-        }
-        if(qs.buffer() && qs.entries_read) {
-            for(std::size_t i = 0; i < qs.entries_read; ++i) {
-                const NETAPI_INFO_T * candidate = qs.buffer()+i;
-                if(candidate->GRPI(group_id) == gid) { // lucky too
-                    return process(candidate);
-                }
-            }
-        }
-        // bummer. run a full query, albeit without touching state
-        QueryState qs;
-        qs.reset();
-        qs.query();
-        const NETAPI_INFO_T * candidate = nullptr;
-        while((candidate = qs.step())) {
-            if(candidate->GRPI(group_id) == gid) {
-                return process(candidate);
-            }
-        }
-        return not_found();
-    }
-} tls;
-
-struct group* FillInternalEntry(const NETAPI_INFO_T* wu_info) {
-    return (wu_info && FillFrom(tls.es.grp, *wu_info, BinderWriter(tls.es.grp_bnd = {}))) ? &tls.es.grp : nullptr;
-}
+static thread_local State<struct group> tls;
 
 } // anonymous
 
@@ -157,37 +129,36 @@ struct group* FillInternalEntry(const NETAPI_INFO_T* wu_info) {
 extern "C" {
 #endif
 
-struct group *getgrgid(gid_t) {
-    //
-    return nullptr;
+struct group *getgrgid(gid_t gid) {
+    return tls.queryById(gid);
 }
 
-struct group *getgrnam(const char *) {
-    //
-    return nullptr;
+struct group *getgrnam(const char * group_name) {
+    return tls.queryByName(group_name);
 }
 
 #if __BSD_VISIBLE || __XPG_VISIBLE
 void setgrent(void) {
-    //
+    tls.beginEnum();
 }
 
 struct group *getgrent(void) {
-    //
-    return nullptr;
+    return tls.nextEntry();
 }
 
 void endgrent(void) {
-    //
+    tls.endEnum();
 }
 #endif
 
 #if __BSD_VISIBLE || __POSIX_VISIBLE >= 199506 || __XPG_VISIBLE
 int getgrgid_r(gid_t, struct group *, char *, size_t, struct group **) {
+    // WIP
     return 0;
 }
 
 int getgrnam_r(const char *, struct group *, char *, size_t, struct group **) {
+    // WIP
     return 0;
 }
 #endif
@@ -198,14 +169,12 @@ int setgroupent(int) {
     return !errno;
 }
 
-int gid_from_group(const char *, gid_t *) {
-    //
-    return 0;
+int gid_from_group(const char * group_name, gid_t * out_gid) {
+    return tls.nameToId(group_name, out_gid);
 }
 
-const char *group_from_gid(gid_t, int) {
-    //
-    return "";
+const char *group_from_gid(gid_t gid, int nogroup) {
+    return tls.idToName(gid, nogroup);
 }
 #endif
 

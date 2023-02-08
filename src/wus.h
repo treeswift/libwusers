@@ -79,7 +79,9 @@ struct FreeNetBuffer {
     void operator()(BYTE* ptr) { if(ptr) NetApiBufferFree(ptr); }
 };
 
-const char* IDToA(OutBinder& out_str, unsigned int id, int no = 0);
+const char* IDToA(OutBinder& out_str, unsigned int id, bool no = false);
+
+void GC(OutBinder& bdr); // trim oldies that probably aren't goldies
 
 unsigned int GetRID(PSID sid);
 
@@ -268,6 +270,48 @@ struct State : public Stateless<POSIX_RECORD_T> {
             // the following could be `std::bind` but I had issues with it before
             [this](const NETAPI_INFO_T* info) { return fillInternalEntry(info); },
             &NotFound<POSIX_RECORD_T>);
+    }
+
+    // utter damn sugar, but let's keep final specializations as thin as possible
+
+    POSIX_RECORD_T* queryByName(const char* name) {
+        set_last_error(0);
+        const std::wstring wname = to_win_str(name);
+        return wname.empty()
+            ? nullptr // sets EINVAL
+            : queryByName(wname);
+    }
+
+    void beginEnum() {
+        query_state.reset();
+        query_state.query();
+    }
+
+    void endEnum() {
+        query_state.reset();
+    }
+
+    const char* idToName(id_t id, bool nouser) {
+        GC(owned_binder);
+        return queryByIdAndMap<const char*>(id, &IA::NameOf,
+            [&](const NETAPI_INFO_T* wu_info) {
+                return BinderWriter(owned_binder)(IA::WNameOf(wu_info));
+            },
+            [&]() { return IDToA(owned_binder, id, nouser); }
+        );
+    }
+
+    int nameToId(const char* name, id_t* out_id) {
+        if(!name) {
+            set_last_error(EINVAL);
+            return -1;
+        }
+        if((owned_binder.size() && IA::NameOf(owned_record) && !std::strcmp(IA::NameOf(owned_record), name))
+            || queryByName(name) /* modifies owned_record used in the next line */) {
+            *out_id = IA::IdOf(owned_record);
+            return 0;
+        }
+        return -1;
     }
 };
 
