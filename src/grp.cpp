@@ -26,9 +26,10 @@ void GetUsersFrom(const wchar_t* group_name, std::function<void(const wchar_t*)>
     // there is no stateful member iteration API, so we keep everything local.
     // we only need names, hence level 0 and GROUP_USERS_INFO_0
     std::unique_ptr<BYTE, FreeNetBuffer> buf;
-    DWORD entries_read;
-    DWORD entries_full;
-    DWORD query_resume;
+    std::size_t n = 0u;
+    DWORD query_resume = 0u; // starting from nonzero resume cookie kills the client badly
+    DWORD entries_full = 0u; // clearing the rest of the state ...
+    DWORD entries_read = 0u; //  ... is mere abundance of caution
     LPBYTE raw_records;
     do switch(NetGroupGetUsers(nullptr, group_name, 0, &raw_records, MAX_PREFERRED_LENGTH,
                                         &entries_read, &entries_full, &query_resume)) {
@@ -51,10 +52,13 @@ void GetUsersFrom(const wchar_t* group_name, std::function<void(const wchar_t*)>
     case NERR_Success: {
         buf.reset(raw_records);
         const GROUP_USERS_INFO_0 * records = reinterpret_cast<const GROUP_USERS_INFO_0 *>(raw_records);
+        n += entries_read;
         while(entries_read > 0 && !errno) {
             on_member((records++)->grui0_name);
+            --entries_read;
         }
-        break; 
+        if(n < entries_full) break;
+        else return;
     }
     case NERR_InternalError:
     default:

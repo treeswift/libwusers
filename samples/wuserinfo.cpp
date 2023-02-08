@@ -30,12 +30,31 @@ void DisplayUserRecord(const struct passwd & u_rec) {
     std::fprintf(stdout, "\n");
 }
 
+void DisplayGroupRecord(const struct group& u_rec) {
+    std::fprintf(stdout, "Group name: %s\n", u_rec.gr_name);
+    std::fprintf(stdout, "Group pass: %s\n", u_rec.gr_passwd);
+    std::fprintf(stdout, "GID (=RID): %u\n", u_rec.gr_gid);
+    if(u_rec.gr_mem && *u_rec.gr_mem) {
+        std::fprintf(stdout, "Members:\n");
+        std::size_t i = 0;
+        while(u_rec.gr_mem[i]) {
+            std::fprintf(stdout, "#%u\t%s\n", i, u_rec.gr_mem[i]);
+            ++i;
+        }
+    } else {
+        std::fprintf(stdout, "The group is empty.\n");
+    }
+    std::fprintf(stdout, "\n");
+}
+
 int main(int argc, char** argv) {
 
     bool show_help = false;
     bool show_list = false;
     bool log_tests = false;
     bool show_dflt = false;
+    bool show_grps = false;
+    bool list_grps = false;
 
     // TODO/nth: pass custom uname or uid
     for(int argi = 1; argi < argc; ++argi) {
@@ -45,6 +64,8 @@ int main(int argc, char** argv) {
             show_list |= 'a' == opt;
             log_tests |= 't' == opt;
             show_dflt |= 'd' == opt;
+            show_grps |= 'g' == opt;
+            list_grps |= 'l' == opt;
         }
     }
 
@@ -54,16 +75,19 @@ This sample command-line tool uses POSIX APIs implemented on Windows (2000+)
 with libwusers to display account information on the local Windows machine.
 
 Usage:
-    wuserinfo.exe [/h] [/a] [/t] [/d]
+    wuserinfo.exe [/h] [/a] [/t] [/d] [/g] [/l]
 
 The meaning of the switches is as follows:
 
     /d  display default users (Administrator and Guest)
     /a  enumerate all user accounts
+    /g  display well-known groups, such as Administrators, with members
+    /l  list all groups with members
     /t  display test log messages ("this feature works! this, too!")
     /h  display this help
 
-    By default, only current account information is displayed.
+    The order of the command-line switches does not affect the display order.
+    If no switches are passed, only current account information is displayed.
 
 wuserinfo.exe and libwusers.dll are public domain worldwide -- both in binary
 and source code. They are free to use and abuse by anyone and for any purpose,
@@ -127,6 +151,8 @@ Further reading: https://github.com/treeswift/libwusers
 
     // enumeration API; overwrites u_rec, but it's copied to copy_a
     if(show_list) {
+        std::fprintf(stdout, "All users:\n\n");
+
         std::size_t user_count = 0u;
         setpwent();
         assert(!errno);
@@ -175,6 +201,20 @@ Further reading: https://github.com/treeswift/libwusers
         genie_name = user_from_uid(GENIE, 22 /*nouser*/);
         assert(!genie_name); // nonexistent => nullptr
         if(log_tests) std::fprintf(stdout, "tests passed: all!\n\n");
+    }
+
+    if(show_grps) {
+        std::fprintf(stdout, "(Some) default groups with well-known RIDs:\n\n");
+    }
+
+    if(list_grps) {
+        std::fprintf(stdout, "All groups:\n\n");
+        setgrent();
+        struct group* cursor;
+        while((cursor = getgrent())) {
+            DisplayGroupRecord(*cursor);
+        }
+        endgrent();
     }
 
     return 0;
