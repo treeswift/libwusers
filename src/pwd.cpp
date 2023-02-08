@@ -152,10 +152,6 @@ struct passwd* QueryByName(const std::wstring& wuser_name, struct passwd* out_pt
     return retval;
 }
 
-struct FreeBuffer {
-    void operator()(BYTE* ptr) { if(ptr) NetApiBufferFree(ptr); }
-};
-
 struct EntryState {
     struct passwd pwd;
     OutBinder pwd_bnd;
@@ -171,7 +167,7 @@ struct QueryState {
     // to finish enumeration in one pass even on a server.
     static constexpr const std::size_t PAGE = 32768u;
 
-    std::unique_ptr<BYTE, FreeBuffer> buf;
+    std::unique_ptr<BYTE, FreeNetBuffer> buf;
     std::size_t offset;
     std::size_t cursor;
     DWORD entries_full;
@@ -198,8 +194,10 @@ struct QueryState {
             set_last_error(EACCES);
             return;
         case ERROR_INVALID_LEVEL:
-        case NERR_InvalidComputer:
             set_last_error(EINVAL);
+            return;
+        case NERR_InvalidComputer:
+            set_last_error(EHOSTUNREACH);
             return;
         case ERROR_MORE_DATA:
         case NERR_Success:

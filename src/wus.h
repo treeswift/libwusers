@@ -13,6 +13,7 @@
 #include <string>
 
 #include <windows.h> // SID -> sid.h, sid.cpp
+#include <lm.h>       // NetApiBufferFree (MOREINFO separate by functionality?)
 
 namespace wusers_impl {
 
@@ -73,6 +74,10 @@ private:
 };
 
 std::wstring ExpandEnvvars(const wchar_t * percent_str);
+
+struct FreeNetBuffer {
+    void operator()(BYTE* ptr) { if(ptr) NetApiBufferFree(ptr); }
+};
 
 const char* IDToA(OutBinder& out_str, unsigned int id, int no = 0);
 
