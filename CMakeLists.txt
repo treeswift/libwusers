@@ -8,13 +8,17 @@
 cmake_minimum_required(VERSION 3.2)
 project(wusers)
 
-set(libheaders
+set(liblibheaders
 "include/wusers/bsd_license.h"
 "include/wusers/wuser_types.h"
 "include/wusers/wuser_cpage.h"
+)
+
+set(libapiheaders
 "include/grp.h"
 "include/pwd.h"
 )
+set(libheaders ${libapiheaders} ${liblibheaders})
 
 set(libsources
 "src/grp.cpp"
@@ -51,7 +55,8 @@ add_executable(wuserinfo ${exesources})
 target_compile_definitions(wuserinfo PRIVATE __BSD_VISIBLE)
 target_link_libraries(wuserinfo wusers)
 
-install(FILES ${libheaders} DESTINATION include)
+install(FILES ${liblibheaders} DESTINATION include/wusers)
+install(FILES ${libapiheaders} DESTINATION include)
 install(TARGETS wusers wuserinfo DESTINATION bin)
 
 set(CPACK_PACKAGE_NAME "wusers")
