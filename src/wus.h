@@ -83,17 +83,19 @@ const char* IDToA(OutBinder& out_str, unsigned int id, int no = 0);
 
 unsigned int GetRID(PSID sid);
 
-template<typename POSIX_T> POSIX_T* PointerTo(POSIX_T& rec) { return &rec; }
-template<typename POSIX_T> POSIX_T* NotFound() { return nullptr; }
+template<typename POSIX_RECORD_T> POSIX_RECORD_T* PointerTo(POSIX_RECORD_T& rec) { return &rec; }
+template<typename POSIX_RECORD_T> POSIX_RECORD_T* NotFound() { return nullptr; }
 
-template<typename POSIX_T, typename NETAPI_INFO_T>
-bool FillFrom(POSIX_T& out, const NETAPI_INFO_T& wu_infoX, const OutWriter& writer);
+template<typename POSIX_RECORD_T> struct IA;
 
-template<typename POSIX_T, typename NETAPI_INFO_T, int LVL,
+template<typename POSIX_RECORD_T, typename NETAPI_INFO_T>
+bool FillFrom(POSIX_RECORD_T& out, const NETAPI_INFO_T& wu_infoX, const OutWriter& writer);
+
+template<typename POSIX_RECORD_T, typename NETAPI_INFO_T, int LVL,
         NET_API_STATUS (*GetInfo)(LPCWSTR, LPCWSTR, DWORD, LPBYTE*),
         NET_API_STATUS StatusNotFound>
-POSIX_T* QueryInfoByName(const std::wstring& name, POSIX_T* out_ptr, const OutWriter& writer) {
-    POSIX_T * retval = nullptr;
+POSIX_RECORD_T* QueryInfoByName(const std::wstring& name, POSIX_RECORD_T* out_ptr, const OutWriter& writer) {
+    POSIX_RECORD_T * retval = nullptr;
     NETAPI_INFO_T * wu_infoX = nullptr;
     switch((*GetInfo)(nullptr, name.c_str(), LVL, reinterpret_cast<unsigned char**>(&wu_infoX))) {
     case ERROR_ACCESS_DENIED:
@@ -192,6 +194,80 @@ struct EnumQueryState {
         } else {
             return nullptr;
         }
+    }
+};
+
+template<typename POSIX_RECORD_T>
+struct Stateless {
+    using IA = IA<POSIX_RECORD_T>;
+    using NETAPI_INFO_T = typename IA::NETAPI_INFO_T;
+
+    static POSIX_RECORD_T* QueryByName(const std::wstring& name, POSIX_RECORD_T* out_ptr, const OutWriter& writer) {
+        return QueryInfoByName<POSIX_RECORD_T, NETAPI_INFO_T, IA::LVL, &IA::GetInfo, IA::NotFound>(name, out_ptr, writer);
+    }
+};
+
+template<typename POSIX_RECORD_T>
+struct State : public Stateless<POSIX_RECORD_T> {
+    using IA = IA<POSIX_RECORD_T>;
+    using id_t  = typename IA::id_t;
+    using NETAPI_INFO_T = typename IA::NETAPI_INFO_T;
+    using QueryState = EnumQueryState<NETAPI_INFO_T, IA::LVL, &IA::Enumerate>;
+
+    POSIX_RECORD_T owned_record;
+    OutBinder owned_binder;
+    QueryState query_state;
+
+    POSIX_RECORD_T* queryByName(const std::wstring& name) {
+        return this->QueryByName(name, &owned_record, BinderWriter(owned_binder = {}));
+    }
+
+    POSIX_RECORD_T* fillInternalEntry(const NETAPI_INFO_T* wu_info) {
+        return (wu_info && FillFrom(owned_record, *wu_info, BinderWriter(owned_binder = {}))) ? &owned_record : nullptr;
+    }
+
+    POSIX_RECORD_T* nextEntry() {
+        return fillInternalEntry(query_state.step());
+    }
+
+    // note that we could extract the condition predicate as well; but there is no POSIX API to request a generic query
+    template<typename R>
+    R queryByIdAndMap(id_t id, std::function<R(POSIX_RECORD_T&)> report_asis,
+                            std::function<R(const NETAPI_INFO_T*)> process,
+                            std::function<R()> not_found) {
+        // let's examine our caches first
+        if(IA::IdOf(owned_record) == id) { // lucky!
+            return report_asis(owned_record);
+        }
+        if(query_state.buffer() && query_state.entries_read) {
+            for(std::size_t i = 0; i < query_state.entries_read; ++i) {
+                const NETAPI_INFO_T * candidate = query_state.buffer()+i;
+                if(IA::IdOf(candidate) == id) { // lucky too
+                    return process(candidate);
+                }
+            }
+        }
+        // bummer. run a full query, albeit without touching state.
+        // we could pull the remainder of this method into Stateless
+        // but let's keep the logic in one place (+encourage caching)
+        QueryState local_query;
+        local_query.reset();
+        local_query.query();
+        const NETAPI_INFO_T * candidate = nullptr;
+        while((candidate = local_query.step())) {
+            if(IA::IdOf(candidate) == id) {
+                return process(candidate);
+            }
+        }
+        return not_found();
+    }
+
+    POSIX_RECORD_T* queryById(id_t id) {
+        return queryByIdAndMap<POSIX_RECORD_T*>(id,
+            &PointerTo<POSIX_RECORD_T>,
+            // the following could be `std::bind` but I had issues with it before
+            [this](const NETAPI_INFO_T* info) { return fillInternalEntry(info); },
+            &NotFound<POSIX_RECORD_T>);
     }
 };
 

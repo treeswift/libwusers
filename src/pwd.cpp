@@ -22,13 +22,14 @@ constexpr const char* SHELL = "cmd.exe"; // default shell
 // WinXP introduces the notion of SID (fully qualified principal ID).
 // There is no use case for them in libwusers at present though, so
 // we don't even mention _WUSER_USE_WINXP_API in CMakeLists.txt
+
 #ifdef _WUSER_USE_WINXP_API
 using USER_INFO_X = USER_INFO_4;
-constexpr int LVL = 4;
+constexpr int ULVL = 4;
 #define USRI(name) usri4_##name
 #else
 using USER_INFO_X = USER_INFO_3;
-constexpr int LVL = 3;
+constexpr int ULVL = 3;
 #define USRI(name) usri3_##name
 #endif
 
@@ -123,64 +124,38 @@ bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX, const OutWriter& 
     return pwd.pw_name; // if this is defined, consider the record valid
 }
 
-NET_API_STATUS NetAccountEnum(LPCWSTR servername, DWORD level, LPBYTE *bufptr, DWORD prefmaxlen,
-                            LPDWORD entriesread, LPDWORD totalentries, PDWORD_PTR resume_handle) {
-    return NetUserEnum(servername, level, FILTER_NORMAL_ACCOUNT /* use 0 to list roaming accounts */,
-                                    bufptr, prefmaxlen, entriesread, totalentries, resume_handle);
-}
+template<> struct IA<struct passwd>
+{
+    using id_t = uid_t;
+    using NETAPI_INFO_T = USER_INFO_X;
+    static constexpr int LVL = ULVL;
+    static constexpr NET_API_STATUS NotFound = NERR_UserNotFound;
+
+    static id_t IdOf(const struct passwd& pwd) {
+        return pwd.pw_uid;
+    }
+
+    static id_t IdOf(const NETAPI_INFO_T* wui) {
+        return wui->USRI(user_id);
+    }
+
+    static NET_API_STATUS Enumerate(LPCWSTR servername, DWORD level, LPBYTE *bufptr, DWORD prefmaxlen,
+                                LPDWORD entriesread, LPDWORD totalentries, PDWORD_PTR resume_handle) {
+        return NetUserEnum(servername, level, FILTER_NORMAL_ACCOUNT /* use 0 to list roaming accounts */,
+                                        bufptr, prefmaxlen, entriesread, totalentries, resume_handle);
+    }
+
+    static NET_API_STATUS GetInfo(LPCWSTR servername, LPCWSTR name, DWORD level, LPBYTE* bufptr) {
+        return NetUserGetInfo(servername, name, level, bufptr);
+    }
+};
 
 } // namespace wusers_impl
 
 namespace {
 using namespace wusers_impl;
 
-static struct passwd* QueryByName(const std::wstring& name, struct passwd* out_ptr, const OutWriter& writer) {
-    return QueryInfoByName<struct passwd, USER_INFO_X, LVL, &NetUserGetInfo, NERR_UserNotFound>(name, out_ptr, writer);
-}
-
-using QueryState = EnumQueryState<USER_INFO_X, LVL, &NetAccountEnum>;
-
-static thread_local struct {
-    struct {
-        struct passwd pwd;
-        OutBinder pwd_bnd;
-    } es;
-    QueryState qs;
-} tls;
-
-struct passwd* FillInternalEntry(const USER_INFO_X* wu_info) {
-    return (wu_info && FillFrom(tls.es.pwd, *wu_info, BinderWriter(tls.es.pwd_bnd = {}))) ? &tls.es.pwd : nullptr;
-}
-
-// note that we could extract the condition predicate as well; but there is no POSIX API to request a generic query
-template<typename R>
-R QueryByUid(uid_t uid, std::function<R(struct passwd&)> report_asis,
-                        std::function<R(const USER_INFO_X*)> process,
-                        std::function<R()> not_found) {
-    // let's examine our caches first
-    if(tls.es.pwd.pw_uid == uid) { // lucky!
-        return report_asis(tls.es.pwd);
-    }
-    if(tls.qs.buffer() && tls.qs.entries_read) {
-        for(std::size_t i = 0; i < tls.qs.entries_read; ++i) {
-            const USER_INFO_X * candidate = tls.qs.buffer()+i;
-            if(candidate->USRI(user_id) == uid) { // lucky too
-                return process(candidate);
-            }
-        }
-    }
-    // bummer. run a full query, albeit without touching state
-    QueryState qs;
-    qs.reset();
-    qs.query();
-    const USER_INFO_X * candidate = nullptr;
-    while((candidate = qs.step())) {
-        if(candidate->USRI(user_id) == uid) {
-            return process(candidate);
-        }
-    }
-    return not_found();
-}
+static thread_local State<struct passwd> tls;
 
 } // anonymous
 
@@ -196,15 +171,14 @@ extern "C" {
 // -- controllers for native user management anyway. TODO put a note in README.md
 
 struct passwd *getpwuid(uid_t uid) {
-    // TODO make thread_local state method, make thread_local state a single object per entity
-    return QueryByUid<struct passwd*>(uid, &PointerTo<struct passwd>, &FillInternalEntry, &NotFound<struct passwd>);
+    return tls.queryById(uid);
 }
 
 struct passwd *getpwnam(const char * user_name) {
     set_last_error(0);
     const std::wstring wuser_name = to_win_str(user_name);
     if(wuser_name.empty()) return nullptr; // sets EINVAL
-    return QueryByName(wuser_name, &tls.es.pwd, BinderWriter(tls.es.pwd_bnd = {}));
+    return tls.queryByName(wuser_name);
 }
 
 // "_shadow()" functions are defined but return EACCES. We don't HAVE_SHADOW_H (or provide it).
@@ -224,8 +198,8 @@ int getpwnam_r(const char * user_name, struct passwd * out_pwd, char * out_buf, 
     set_last_error(0);
     *out_ptr = nullptr;
     const std::wstring wuser_name = to_win_str(user_name);
-    if(wuser_name.empty()) {
-        *out_ptr = QueryByName(wuser_name, out_pwd, BufferWriter(out_buf, buf_len));
+    if(wuser_name.size()) {
+        *out_ptr = Stateless<struct passwd>::QueryByName(wuser_name, out_pwd, BufferWriter(out_buf, buf_len));
         if(errno) *out_ptr = nullptr; // kill partial|inconsistent output
     }
     return errno;
@@ -235,7 +209,7 @@ int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_le
     set_last_error(0);
     *out_ptr = nullptr;
     BufferWriter writer(out_buf, buf_len);
-    QueryByUid<int>(uid,
+    tls.queryByIdAndMap<int>(uid,
         [&](struct passwd& pwd) {
             // inefficient double string copy, but we save a (waaay more expensive) trip to the kernel/COM/NET
             struct passwd* copy = pw_dup(&pwd);
@@ -271,16 +245,16 @@ int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_le
 
 #if __BSD_VISIBLE || __XPG_VISIBLE
 void setpwent(void) {
-    tls.qs.reset();
-    tls.qs.query();
+    tls.query_state.reset();
+    tls.query_state.query();
 }
 
 struct passwd *getpwent(void) {
-    return FillInternalEntry(tls.qs.step());
+    return tls.nextEntry();
 }
 
 void endpwent(void) {
-    tls.qs.reset();
+    tls.query_state.reset();
 }
 #endif
 
@@ -295,8 +269,8 @@ int uid_from_user(const char * user_name, uid_t * out_uid) {
         set_last_error(EINVAL);
         return -1;
     }
-    if((tls.es.pwd_bnd.size() && tls.es.pwd.pw_name && !std::strcmp(tls.es.pwd.pw_name, user_name)) || getpwnam(user_name)) {
-        *out_uid = tls.es.pwd.pw_uid;
+    if((tls.owned_binder.size() && tls.owned_record.pw_name && !std::strcmp(tls.owned_record.pw_name, user_name)) || getpwnam(user_name)) {
+        *out_uid = tls.owned_record.pw_uid;
         return 0;
     }
     return -1;
@@ -304,21 +278,21 @@ int uid_from_user(const char * user_name, uid_t * out_uid) {
 
 const char *user_from_uid(uid_t uid, int nouser) {
     // memory leak prevention; constants=arbitrary
-    if(tls.es.pwd_bnd.size() > 512u) {
+    if(tls.owned_binder.size() > 512u) {
         // too many entries used...
-        auto itr = tls.es.pwd_bnd.begin();
+        auto itr = tls.owned_binder.begin();
         // keep the last complete entry intact, but keep erasing
         // those singular strings that are piling up on top of it
         for(std::size_t i = 0; i < 12u; ++i) {
             ++itr;
         }
         // ...yep, this. looks old enough.
-        tls.es.pwd_bnd.erase(itr);
+        tls.owned_binder.erase(itr);
     }
-    return QueryByUid<const char*>(uid,
+    return tls.queryByIdAndMap<const char*>(uid,
         [](struct passwd& pwd) { return pwd.pw_name; },
-        [&](const USER_INFO_X* wu_info) { return BinderWriter(tls.es.pwd_bnd)(wu_info->USRI(name)); },
-        [&]() { return IDToA(tls.es.pwd_bnd, uid, nouser); }
+        [&](const USER_INFO_X* wu_info) { return BinderWriter(tls.owned_binder)(wu_info->USRI(name)); },
+        [&]() { return IDToA(tls.owned_binder, uid, nouser); }
     );
 }
 
