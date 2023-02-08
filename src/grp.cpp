@@ -14,12 +14,7 @@
 #include <memory>
 #include <string>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-namespace {
-using namespace wusers_impl;
+namespace wusers_impl {
 
 constexpr const char* ASTER = "*"; // no such thing as a group password on Windows
 
@@ -68,7 +63,7 @@ void GetUsersFrom(const wchar_t* group_name, std::function<void(const wchar_t*)>
     } while(!errno);
 }
 
-// no heuristics and/or second guesses here, unlike FillFrom() in pwd.cpp.
+// no heuristics and/or second guesses here, unlike FillFrom() in grp.cpp.
 // getting the member list requires a catch-up call to NetGroupGetUsers();
 // storing it requires passing a raw memory range into `writer`. therefore
 // `writer` can't be std::function anymore. making it a virtual class.
@@ -96,7 +91,66 @@ bool FillFrom(struct group& grp, const GROUP_INFO_X& wg_infoX, const OutWriter& 
     return grp.gr_name && !errno;
 }
 
+} // namespace wusers_impl
+
+namespace
+{ 
+using namespace wusers_impl; 
+
+static struct group* QueryByName(const std::wstring& name, struct group* out_ptr, const OutWriter& writer) {
+    return QueryInfoByName<struct group, GROUP_INFO_X, LVL, &NetUserGetInfo, NERR_UserNotFound>(name, out_ptr, writer);
 }
+
+using QueryState = EnumQueryState<GROUP_INFO_X, LVL, &NetGroupEnum>;
+
+static thread_local struct {
+    struct {
+        struct group grp;
+        OutBinder grp_bnd;
+    } es;
+    QueryState qs;
+} tls;
+
+struct group* FillInternalEntry(const GROUP_INFO_X* wu_info) {
+    return (wu_info && FillFrom(tls.es.grp, *wu_info, BinderWriter(tls.es.grp_bnd = {}))) ? &tls.es.grp : nullptr;
+}
+
+// note that we could extract the condition predicate as well; but there is no POSIX API to request a generic query
+template<typename R>
+R QueryByUid(uid_t gid, std::function<R(struct group&)> report_asis,
+                        std::function<R(const GROUP_INFO_X*)> process,
+                        std::function<R()> not_found) {
+    // let's examine our caches first
+    if(tls.es.grp.gr_gid == gid) { // lucky!
+        return report_asis(tls.es.grp);
+    }
+    if(tls.qs.buffer() && tls.qs.entries_read) {
+        for(std::size_t i = 0; i < tls.qs.entries_read; ++i) {
+            const GROUP_INFO_X * candidate = tls.qs.buffer()+i;
+            if(candidate->GRPI(group_id) == gid) { // lucky too
+                return process(candidate);
+            }
+        }
+    }
+    // bummer. run a full query, albeit without touching state
+    QueryState qs;
+    qs.reset();
+    qs.query();
+    const GROUP_INFO_X * candidate = nullptr;
+    while((candidate = qs.step())) {
+        if(candidate->GRPI(group_id) == gid) {
+            return process(candidate);
+        }
+    }
+    return not_found();
+}
+
+} // anonymous
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 struct group *getgrgid(gid_t) {
     //

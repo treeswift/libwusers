@@ -14,8 +14,7 @@
 #include <memory>
 #include <sstream>
 
-namespace {
-using namespace wusers_impl;
+namespace wusers_impl {
 
 constexpr const char* ASTER = "*"; // the elusive password "hash"
 constexpr const char* SHELL = "cmd.exe"; // default shell
@@ -121,128 +120,37 @@ bool FillFrom(struct passwd& pwd, const USER_INFO_X& wu_infoX, const OutWriter& 
         pwd.pw_change -= 86400;
     }
     
-    return pwd.pw_name; // if this is defined, the record is kinda valid
+    return pwd.pw_name; // if this is defined, consider the record valid
 }
 
-struct passwd* QueryByName(const std::wstring& wuser_name, struct passwd* out_ptr, const OutWriter& writer) {
-    struct passwd * retval = nullptr;
-    USER_INFO_X * wu_infoX = nullptr;
-    switch(NetUserGetInfo(nullptr, wuser_name.data(), LVL, reinterpret_cast<unsigned char**>(&wu_infoX))) {
-    case ERROR_ACCESS_DENIED:
-        set_last_error(EACCES);
-        break;
-    case ERROR_BAD_NETPATH: // can't happen -- we are local
-    case NERR_InvalidComputer: // ^^ ditto
-        set_last_error(EHOSTUNREACH);
-        break;
-    case NERR_UserNotFound:
-        set_last_error(ENOENT);
-        break;
-    case NERR_Success:
-        retval = out_ptr;
-        FillFrom(*retval, *wu_infoX, writer);
-        break;
-    default:
-        set_last_error(EIO);
-    }
-    if(wu_infoX) {
-        NetApiBufferFree(wu_infoX);
-    }
-   // tls_es.pwd_bnd can't fail with ERANGE (the client buffer can)
-    return retval;
+NET_API_STATUS NetAccountEnum(LPCWSTR servername, DWORD level, LPBYTE *bufptr, DWORD prefmaxlen,
+                            LPDWORD entriesread, LPDWORD totalentries, PDWORD_PTR resume_handle) {
+    return NetUserEnum(servername, level, FILTER_NORMAL_ACCOUNT /* use 0 to list roaming accounts */,
+                                    bufptr, prefmaxlen, entriesread, totalentries, resume_handle);
 }
 
-struct EntryState {
-    struct passwd pwd;
-    OutBinder pwd_bnd;
-};
+} // namespace wusers_impl
 
-// while EntryState(^) is pretty much a passive storage container,
-// there is enough logic in QueryState to warrant objectification
+namespace {
+using namespace wusers_impl;
 
-struct QueryState {
-    // set large enough to fit in a single query on a workstation
-    // but small enough to avoid hoarding too much memory.
-    // MAX_PREFERRED_LENGTH will request as much memory as needed
-    // to finish enumeration in one pass even on a server.
-    static constexpr const std::size_t PAGE = 32768u;
+static struct passwd* QueryByName(const std::wstring& name, struct passwd* out_ptr, const OutWriter& writer) {
+    return QueryInfoByName<struct passwd, USER_INFO_X, LVL, &NetUserGetInfo, NERR_UserNotFound>(name, out_ptr, writer);
+}
 
-    std::unique_ptr<BYTE, FreeNetBuffer> buf;
-    std::size_t offset;
-    std::size_t cursor;
-    DWORD entries_full;
-    DWORD entries_read;
-    DWORD query_resume;
+using QueryState = EnumQueryState<USER_INFO_X, LVL, &NetAccountEnum>;
 
-    const USER_INFO_X* buffer() const { return reinterpret_cast<const USER_INFO_X*>(buf.get()); }
-
-    void reset() {
-        buf.reset();
-        offset = 0u;
-        entries_read = 0u;
-        entries_full = 0u;
-        query_resume = 0u;
-    }
-
-    void query() {
-        set_last_error(0);
-        LPBYTE optr;
-        auto page = PAGE;
-        do switch(NetUserEnum(nullptr, LVL, FILTER_NORMAL_ACCOUNT /* use 0 to list roaming accounts */,  
-                                    &optr, page, &entries_read, &entries_full, &query_resume)) {
-        case ERROR_ACCESS_DENIED:
-            set_last_error(EACCES);
-            return;
-        case ERROR_INVALID_LEVEL:
-            set_last_error(EINVAL);
-            return;
-        case NERR_InvalidComputer:
-            set_last_error(EHOSTUNREACH);
-            return;
-        case ERROR_MORE_DATA:
-        case NERR_Success:
-            buf.reset(optr);
-            offset += cursor;
-            cursor = 0u;
-            return;
-        case NERR_BufTooSmall:
-            page <<= 1;
-            break;
-        default:
-            set_last_error(EIO);
-            return;
-        } while(!errno);
-    }
-
-    const USER_INFO_X* curr() const {
-        return &buffer()[cursor];
-    }
-
-    const USER_INFO_X* step() {
-        if(buf.get()) {
-            if(cursor >= entries_read) {
-                if(cursor + offset >= entries_full) {
-                    return nullptr;
-                } else {
-                    query();
-                }
-            }
-            return &buffer()[cursor++];
-        } else {
-            return nullptr;
-        }
-    }
-};
-
-static thread_local EntryState tls_es;
-static thread_local QueryState tls_qs;
+static thread_local struct {
+    struct {
+        struct passwd pwd;
+        OutBinder pwd_bnd;
+    } es;
+    QueryState qs;
+} tls;
 
 struct passwd* FillInternalEntry(const USER_INFO_X* wu_info) {
-    return (wu_info && FillFrom(tls_es.pwd, *wu_info, BinderWriter(tls_es.pwd_bnd = {}))) ? &tls_es.pwd : nullptr;
+    return (wu_info && FillFrom(tls.es.pwd, *wu_info, BinderWriter(tls.es.pwd_bnd = {}))) ? &tls.es.pwd : nullptr;
 }
-
-struct passwd* Identity(struct passwd& pwd) { return &pwd; } // as is
-struct passwd* NotFound() { return nullptr; } // typed neutral element
 
 // note that we could extract the condition predicate as well; but there is no POSIX API to request a generic query
 template<typename R>
@@ -250,12 +158,12 @@ R QueryByUid(uid_t uid, std::function<R(struct passwd&)> report_asis,
                         std::function<R(const USER_INFO_X*)> process,
                         std::function<R()> not_found) {
     // let's examine our caches first
-    if(tls_es.pwd.pw_uid == uid) { // lucky!
-        return report_asis(tls_es.pwd);
+    if(tls.es.pwd.pw_uid == uid) { // lucky!
+        return report_asis(tls.es.pwd);
     }
-    if(tls_qs.buffer() && tls_qs.entries_read) {
-        for(std::size_t i = 0; i < tls_qs.entries_read; ++i) {
-            const USER_INFO_X * candidate = tls_qs.buffer()+i;
+    if(tls.qs.buffer() && tls.qs.entries_read) {
+        for(std::size_t i = 0; i < tls.qs.entries_read; ++i) {
+            const USER_INFO_X * candidate = tls.qs.buffer()+i;
             if(candidate->USRI(user_id) == uid) { // lucky too
                 return process(candidate);
             }
@@ -274,7 +182,7 @@ R QueryByUid(uid_t uid, std::function<R(struct passwd&)> report_asis,
     return not_found();
 }
 
-} // namespace
+} // anonymous
 
 #ifdef __cplusplus
 extern "C" {
@@ -288,14 +196,15 @@ extern "C" {
 // -- controllers for native user management anyway. TODO put a note in README.md
 
 struct passwd *getpwuid(uid_t uid) {
-    return QueryByUid<struct passwd*>(uid, &Identity, &FillInternalEntry, &NotFound);
+    // TODO make thread_local state method, make thread_local state a single object per entity
+    return QueryByUid<struct passwd*>(uid, &PointerTo<struct passwd>, &FillInternalEntry, &NotFound<struct passwd>);
 }
 
 struct passwd *getpwnam(const char * user_name) {
     set_last_error(0);
     const std::wstring wuser_name = to_win_str(user_name);
     if(wuser_name.empty()) return nullptr; // sets EINVAL
-    return QueryByName(wuser_name, &tls_es.pwd, BinderWriter(tls_es.pwd_bnd = {}));
+    return QueryByName(wuser_name, &tls.es.pwd, BinderWriter(tls.es.pwd_bnd = {}));
 }
 
 // "_shadow()" functions are defined but return EACCES. We don't HAVE_SHADOW_H (or provide it).
@@ -362,16 +271,16 @@ int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_le
 
 #if __BSD_VISIBLE || __XPG_VISIBLE
 void setpwent(void) {
-    tls_qs.reset();
-    tls_qs.query();
+    tls.qs.reset();
+    tls.qs.query();
 }
 
 struct passwd *getpwent(void) {
-    return FillInternalEntry(tls_qs.step());
+    return FillInternalEntry(tls.qs.step());
 }
 
 void endpwent(void) {
-    tls_qs.reset();
+    tls.qs.reset();
 }
 #endif
 
@@ -386,8 +295,8 @@ int uid_from_user(const char * user_name, uid_t * out_uid) {
         set_last_error(EINVAL);
         return -1;
     }
-    if((tls_es.pwd_bnd.size() && tls_es.pwd.pw_name && !std::strcmp(tls_es.pwd.pw_name, user_name)) || getpwnam(user_name)) {
-        *out_uid = tls_es.pwd.pw_uid;
+    if((tls.es.pwd_bnd.size() && tls.es.pwd.pw_name && !std::strcmp(tls.es.pwd.pw_name, user_name)) || getpwnam(user_name)) {
+        *out_uid = tls.es.pwd.pw_uid;
         return 0;
     }
     return -1;
@@ -395,21 +304,21 @@ int uid_from_user(const char * user_name, uid_t * out_uid) {
 
 const char *user_from_uid(uid_t uid, int nouser) {
     // memory leak prevention; constants=arbitrary
-    if(tls_es.pwd_bnd.size() > 512u) {
+    if(tls.es.pwd_bnd.size() > 512u) {
         // too many entries used...
-        auto itr = tls_es.pwd_bnd.begin();
+        auto itr = tls.es.pwd_bnd.begin();
         // keep the last complete entry intact, but keep erasing
         // those singular strings that are piling up on top of it
         for(std::size_t i = 0; i < 12u; ++i) {
             ++itr;
         }
         // ...yep, this. looks old enough.
-        tls_es.pwd_bnd.erase(itr);
+        tls.es.pwd_bnd.erase(itr);
     }
     return QueryByUid<const char*>(uid,
         [](struct passwd& pwd) { return pwd.pw_name; },
-        [&](const USER_INFO_X* wu_info) { return BinderWriter(tls_es.pwd_bnd)(wu_info->USRI(name)); },
-        [&]() { return IDToA(tls_es.pwd_bnd, uid, nouser); }
+        [&](const USER_INFO_X* wu_info) { return BinderWriter(tls.es.pwd_bnd)(wu_info->USRI(name)); },
+        [&]() { return IDToA(tls.es.pwd_bnd, uid, nouser); }
     );
 }
 
