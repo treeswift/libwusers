@@ -12,6 +12,7 @@ set(liblibheaders
 "include/wusers/bsd_license.h"
 "include/wusers/wuser_types.h"
 "include/wusers/wuser_cpage.h"
+"include/wusers/wuser_eugid.h"
 )
 
 set(libapiheaders
@@ -30,7 +31,7 @@ set(libsources
 # Tuning:
 # _WUSER_NO_HEURISTICS to bypass home folder search
 
-set(compiledefs "__BSD_VISIBLE=1")
+set(compiledefs "__BSD_VISIBLE=1" "SECURITY_WIN32")
 
 if(MINGW)
     # only affects the library & samples, not headers
@@ -48,7 +49,7 @@ include_directories(include)
 add_library(wusers ${libheaders} ${libsources})
 target_compile_options(wusers PRIVATE ${compile_flags})
 target_compile_definitions(wusers PRIVATE ${compiledefs})
-target_link_libraries(wusers -lnetapi32 -lkernel32 -ladvapi32)
+target_link_libraries(wusers -lnetapi32 -lkernel32 -ladvapi32 -lsecur32)
 
 set(exesources "samples/wuserinfo.cpp")
 add_executable(wuserinfo ${exesources})

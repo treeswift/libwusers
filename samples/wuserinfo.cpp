@@ -8,6 +8,8 @@
 #include <pwd.h>
 #include <grp.h>
 
+#include <wusers/wuser_eugid.h>
+
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -97,13 +99,23 @@ Further reading: https://github.com/treeswift/libwusers
 
 )NOMOREHELP");
 
-    std::string uname(MAX_PATH, L'\0');
+    std::string uname(MAX_PATH, '\0');
     std::size_t u_len = ExpandEnvironmentStringsA("%USERNAME%", &uname[0], uname.size());
     assert(u_len < MAX_PATH);
-    uname.resize(u_len, L'\0');
+    uname.resize(u_len, '\0');
 
     const struct passwd & u_rec = *getpwnam(uname.c_str());
     DisplayUserRecord(u_rec);
+
+    uid_t effective_uid = geteuid();
+    gid_t effective_gid = getegid();
+    uid_t real_uid = getuid();
+    gid_t real_gid = getgid();
+    if(log_tests)
+    {
+        std::fprintf(stdout, "get[e]{u|g}id() API: real %u:%u, effective %u:%u\n\n",
+                            real_uid, real_gid, effective_uid, effective_gid);
+    }
 
     const uid_t last_uid = u_rec.pw_uid;
     uid_t dupl_uid = ~0;

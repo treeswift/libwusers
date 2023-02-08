@@ -5,13 +5,17 @@
  * No warranty is given; refer to the LICENSE file in the project root.
  */
 
+
 #include "pwd.h"      // API
+#include "wusers/wuser_eugid.h" // bonus API
+
 #include "wus.h"  // library state
 #include <windows.h>  // *backend deps
 #include <lm.h>       // backend
 #include <errno.h>    // error codes
 
 #include <memory>
+#include <iostream>
 #include <sstream>
 
 namespace wusers_impl {
@@ -153,6 +157,24 @@ namespace {
 using namespace wusers_impl;
 
 static thread_local State<struct passwd> tls;
+
+std::wstring GetRealName() {
+    // inlined in FIllFrom for clarity
+    return ExpandEnvvars(L"%USERNAME%");
+}
+
+struct WhoamiEntry : public passwd {
+    OutBinder bdr;
+    bool success;
+    
+    const WhoamiEntry& lookup(const std::wstring& name) {
+        success = Stateless<struct passwd>::QueryByName(name, this, BinderWriter(bdr));
+        return *this;
+    }
+
+    uid_t uid() const { return success ? pw_uid : -1; }
+    gid_t gid() const { return success ? pw_gid : -1; }
+};
 
 } // anonymous
 
@@ -320,6 +342,14 @@ struct passwd *pw_dup(const struct passwd * src) {
     return trg;
 }
 #endif // __BSD_VISIBLE
+
+// wusers/wuser_eugid.h
+
+uid_t geteuid(void) { return WhoamiEntry().lookup(GetEffectiveName()).uid(); }
+gid_t getegid(void) { return WhoamiEntry().lookup(GetEffectiveName()).gid(); }
+
+uid_t getuid(void) { return WhoamiEntry().lookup(GetRealName()).uid(); }
+gid_t getgid(void) { return WhoamiEntry().lookup(GetRealName()).gid(); }
 
 #ifdef __cplusplus
 }

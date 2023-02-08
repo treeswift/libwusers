@@ -15,6 +15,7 @@
 #include <sstream>
 
 #include <windows.h> // stringapiset.h, errhandlingapi.h, userenv.h
+#include <secext.h>  // GetUserNameExW
 
 namespace {
 constexpr unsigned int WUSER_UNSET_CP = ~0u;
@@ -164,22 +165,6 @@ const char* IDToA(OutBinder& out_bdr, unsigned int id, bool no) {
     return out_bdr.back().c_str();
 }
 
-std::wstring ExpandEnvvars(const wchar_t * percent_str) {
-    std::size_t def_len = MAX_PATH;
-    std::wstring out(def_len, L'\0');
-    std::size_t out_len = ExpandEnvironmentStringsW(percent_str, &out[0], out.size());
-    out.resize(out_len, L'\0');
-    if(out_len > def_len) {
-        // request complete data
-        ExpandEnvironmentStringsW(percent_str, &out[0], out.size());
-    }
-    return out;
-}
-
-unsigned int GetRID(PSID sid) {
-    return *GetSidSubAuthority(sid, *GetSidSubAuthorityCount(sid)-1);
-}
-
 void GC(OutBinder& bdr) {
     // memory leak prevention; constants:=arbitrary within reasonable
     if(bdr.size() > 512u) {
@@ -193,6 +178,41 @@ void GC(OutBinder& bdr) {
         // ...yep, this. looks old enough.
         bdr.erase(itr);
     }
+}
+
+std::wstring ExpandEnvvars(const wchar_t * percent_str) {
+    std::size_t def_len = MAX_PATH;
+    std::wstring out(def_len, L'\0');
+    std::size_t out_len = ExpandEnvironmentStringsW(percent_str, &out[0], out.size());
+    out.resize(out_len, L'\0');
+    if(out_len > def_len) {
+        // request complete data
+        ExpandEnvironmentStringsW(percent_str, &out[0], out.size());
+    }
+    return out;
+}
+
+std::wstring GetEffectiveName() {
+    std::wstring qual_name(MAX_PATH, L'\0');
+    ULONG namelen = qual_name.size();
+    int complete = GetUserNameExW(NameSamCompatible, &qual_name[0], &namelen);
+    qual_name.resize(namelen);
+    if(!complete) {
+        if(ERROR_MORE_DATA == GetLastError()) {
+            GetUserNameExW(NameSamCompatible, &qual_name[0], &namelen);
+        } else {
+            return {};
+        }
+    }
+    std::size_t last_bs = qual_name.find_last_of('\\');
+    return (std::wstring::npos == last_bs)
+            ? qual_name : qual_name.substr(last_bs + 1);
+}
+
+void FreeNetBuffer::operator()(BYTE* ptr) const { if(ptr) NetApiBufferFree(ptr); }
+
+unsigned int GetRID(PSID sid) {
+    return *GetSidSubAuthority(sid, *GetSidSubAuthorityCount(sid)-1);
 }
 
 } // namespace wusers_impl

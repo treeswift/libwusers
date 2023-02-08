@@ -13,7 +13,7 @@
 #include <string>
 
 #include <windows.h> // SID -> sid.h, sid.cpp
-#include <lm.h>       // NetApiBufferFree (MOREINFO separate by functionality?)
+#include <lm.h>      // NetApiBufferFree
 
 namespace wusers_impl {
 
@@ -73,15 +73,17 @@ private:
     OutBinder& out_bdr;
 };
 
-std::wstring ExpandEnvvars(const wchar_t * percent_str);
-
-struct FreeNetBuffer {
-    void operator()(BYTE* ptr) { if(ptr) NetApiBufferFree(ptr); }
-};
-
 const char* IDToA(OutBinder& out_str, unsigned int id, bool no = false);
 
 void GC(OutBinder& bdr); // trim oldies that probably aren't goldies
+
+// miscellaneous utility functions
+
+std::wstring ExpandEnvvars(const wchar_t * percent_str);
+
+std::wstring GetEffectiveName(); // uses GetUserNameExW inside
+
+struct FreeNetBuffer { void operator()(BYTE* ptr) const; };
 
 unsigned int GetRID(PSID sid);
 
