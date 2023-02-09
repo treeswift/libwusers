@@ -10,14 +10,18 @@
 #include <stdint.h>
 #include <time.h>
 
+#ifndef uid_t
 #ifndef _UID_T_DEFINED_
 #define _UID_T_DEFINED_
-typedef uint32_t uid_t;
-#endif
+typedef int uid_t;
+#endif // as a type
+#endif // as a macro
 
+#ifndef gid_t
 #ifndef _GID_T_DEFINED_
 #define _GID_T_DEFINED_
-typedef uint32_t gid_t;
-#endif
+typedef int gid_t;
+#endif // as a type
+#endif // as a macro
 
 #endif /* _WUSER_TYPES_H_ */
