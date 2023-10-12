@@ -5,7 +5,6 @@
  * No warranty is given; refer to the LICENSE file in the project root.
  */
 
-
 #include "pwd.h"      // API
 #include "wusers/wuser_eugid.h" // bonus API
 
@@ -259,7 +258,6 @@ int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_le
     return errno;
 }
 
-#if __BSD_VISIBLE || __XPG_VISIBLE
 void setpwent(void) {
     tls.beginEnum();
 }
@@ -271,9 +269,7 @@ struct passwd *getpwent(void) {
 void endpwent(void) {
     tls.endEnum();
 }
-#endif
 
-#if __BSD_VISIBLE
 int setpassent(int) {
     setpwent();
     return !errno;
@@ -341,7 +337,6 @@ struct passwd *pw_dup(const struct passwd * src) {
     trg->pw_shell = pass(src->pw_shell);
     return trg;
 }
-#endif // __BSD_VISIBLE
 
 // wusers/wuser_eugid.h
 

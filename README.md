@@ -48,7 +48,7 @@ the intended use case.
 
 ## Memory ownership
 
-Memory ownership by `libwusers` is exactly as documented in the respective OpenBSD manual pages: the library owns
+Memory ownership by `libwusers` is BSD-style, as documented in the respective OpenBSD manual pages: the library owns
 * the last (translated) entry returned by non-reentrant APIs, together with its string data;
 * the last batch of (untranslated) entries being iterated over with `*ent` API;
 * (as a courtesy) the last few hundred solitary user names and stringified UIDs.
@@ -65,10 +65,7 @@ Semantically constant C-string values (such as `*` in lieu of passwords, or priv
 
 ## License
 
-`libwusers` is free as in freedom. `struct passwd` and `struct group` definitions, as well as POSIX and BSD API function prototypes,
-thin as they are, have been reused from [OpenBSD source code](https://github.com/openbsd/src/tree/master/include) available under the
-[3-clause BSD license](https://www.openbsd.org/policy.html). Everything contributed on top of that — particularly, but not limited to,
-executable code, algorithms and documentation — is released into the public domain (where it rightfully belongs)
+`libwusers` is free as in freedom and released into the public domain (where it rightfully belongs)
 with a no-strings-attached [CC0 license](LICENSE).
 
 ## Support

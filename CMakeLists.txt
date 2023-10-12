@@ -9,7 +9,6 @@ cmake_minimum_required(VERSION 3.2)
 project(wusers)
 
 set(liblibheaders
-"include/wusers/bsd_license.h"
 "include/wusers/wuser_types.h"
 "include/wusers/wuser_cpage.h"
 "include/wusers/wuser_eugid.h"
@@ -31,7 +30,7 @@ set(libsources
 # Tuning:
 # _WUSER_NO_HEURISTICS to bypass home folder search
 
-set(compiledefs "__BSD_VISIBLE=1" "SECURITY_WIN32")
+set(compiledefs "SECURITY_WIN32")
 
 if(MINGW)
     # only affects the library & samples, not headers
@@ -53,7 +52,6 @@ target_link_libraries(wusers -lnetapi32 -lkernel32 -ladvapi32 -lsecur32)
 
 set(exesources "samples/wuserinfo.cpp")
 add_executable(wuserinfo ${exesources})
-target_compile_definitions(wuserinfo PRIVATE __BSD_VISIBLE)
 target_link_libraries(wuserinfo wusers)
 
 install(FILES ${liblibheaders} DESTINATION include/wusers)

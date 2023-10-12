@@ -1,26 +1,26 @@
 /**
- * This file is a rewritten "pwd.h" from OpenBSD headers, itself
- * available under the 3-clause BSD license ("bsd_license.h").
- * The use of this file is free as in freedom; no warranty is given.
+ * This file has no copyright assigned and is placed in the public domain.
+ * This file is part of the libwusers compatibility library:
+ *   https://github.com/treeswift/libwusers
+ * No warranty is given; refer to the LICENSE file in the project root.
  */
 
 #ifndef _PWD_H_
 #define _PWD_H_
 
-#include "wusers/bsd_license.h"
 #include "wusers/wuser_types.h"
 
 struct passwd {
-    char *pw_name; /* user name */
-    char *pw_passwd; /* encrypted password */
-    uid_t pw_uid; /* user uid */
-    gid_t pw_gid; /* user gid */
-    time_t pw_change; /* password change time */
-    char *pw_class; /* user access class */
-    char *pw_gecos; /* Honeywell login info */
-    char *pw_dir; /* home directory */
-    char *pw_shell; /* default shell */
-    time_t pw_expire; /* account expiration */
+    char *pw_name;
+    char *pw_passwd;
+    uid_t pw_uid;
+    gid_t pw_gid;
+    time_t pw_change;
+    char *pw_class;
+    char *pw_gecos;
+    char *pw_dir;
+    char *pw_shell;
+    time_t pw_expire;
 };
 
 /* libwusers note: pw_shell MUST be the last char* field lest certain buffer sizing assumptions break */
@@ -41,15 +41,12 @@ struct passwd *getpwnam_shadow(const char * user_name);
 int getpwuid_r(uid_t uid, struct passwd * out_pwd, char * out_buf, size_t buf_len, struct passwd ** out_ptr);
 int getpwnam_r(const char * user_name, struct passwd * out_pwd, char * out_buf, size_t buf_len, struct passwd ** out_ptr);
 
-#if __BSD_VISIBLE || __XPG_VISIBLE
 void setpwent(void);
 struct passwd *getpwent(void);
 void endpwent(void);
-#endif
 
 /* NOTE: no Windows equivalents exist for fgetpwent, fgetpwent_r */
 
-#if __BSD_VISIBLE
 /* Equivalent to setpwent(); `stayopen` is irrelevant and, therefore, ignored. */
 int setpassent(int stayopen);
 
@@ -66,12 +63,12 @@ char *bcrypt(const char *, const char *);
 int bcrypt_newhash(const char *, int, char *, size_t);
 int bcrypt_checkpass(const char *, const char *);
 #endif // _WUSERS_ENABLE_BCRYPT
+
 struct passwd *pw_dup(const struct passwd * src);
-#endif // __BSD_VISIBLE
 
 /* __END_DECLS */
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* !_PWD_H_ */
+#endif /* _PWD_H_ */

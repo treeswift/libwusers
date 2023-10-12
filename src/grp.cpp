@@ -141,7 +141,6 @@ struct group *getgrnam(const char * group_name) {
     return tls.queryByName(group_name);
 }
 
-#if __BSD_VISIBLE || __XPG_VISIBLE
 void setgrent(void) {
     tls.beginEnum();
 }
@@ -153,9 +152,7 @@ struct group *getgrent(void) {
 void endgrent(void) {
     tls.endEnum();
 }
-#endif
 
-#if __BSD_VISIBLE || __POSIX_VISIBLE >= 199506 || __XPG_VISIBLE
 int getgrnam_r(const char * group_name, struct group * out_grp, char * out_buf, size_t buf_len, struct group ** out_ptr) {
     // the code is identical to getpwnam_r, but set_last_error() would probably look funny in Stateless<>; leave for now
     set_last_error(0);
@@ -214,9 +211,7 @@ int getgrgid_r(gid_t gid, struct group * out_grp, char * out_buf, size_t buf_len
         [](){ return -1; });
     return errno;
 }
-#endif
 
-#if __BSD_VISIBLE
 int setgroupent(int) {
     setgrent();
     return !errno;
@@ -229,7 +224,6 @@ int gid_from_group(const char * group_name, gid_t * out_gid) {
 const char *group_from_gid(gid_t gid, int nogroup) {
     return tls.idToName(gid, nogroup);
 }
-#endif
 
 #ifdef __cplusplus
 }
